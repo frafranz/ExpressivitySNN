@@ -8,11 +8,10 @@ import time
 import torch
 import torch.nn
 import torch.autograd
-import yaml
 
 torch.set_default_dtype(torch.float64)
 
-import utils_spiketime_et as utils_spiketime
+import utils_spiketime_linear as utils_spiketime # to make use of our linear activation model
 
 
 class EqualtimeFunctionEventbased(torch.autograd.Function):

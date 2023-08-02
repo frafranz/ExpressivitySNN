@@ -8,7 +8,6 @@ import os.path as osp
 import shutil
 import subprocess
 import sys
-import time
 import torch
 import yaml
 
@@ -87,6 +86,12 @@ class Net(torch.nn.Module):
 
         if self.rounding:
             print(f"#### Rounding the weights to precision {self.rounding_precision}")
+        return
+    
+    def verify_gradient(self, n_inputs, device):
+        input_times = utils.to_device(torch.rand(1,n_inputs,dtype=torch.double,requires_grad=True), device)
+        test = torch.autograd.gradcheck(self, input_times) # TODO: throws AttributeError: 'list' object has no attribute 'requires_grad'
+        print(test)
         return
 
     def __del__(self):
@@ -276,6 +281,7 @@ class Net(torch.nn.Module):
                 layer.weights.data = self.round_weights(layer.weights.data, self.rounding_precision)
 
         if not self.use_hicannx:
+            # below, the actual pass through the layers of the network is defined, including the bias terms
             hidden_times = []
             for i in range(self.n_layers):
                 input_times_including_bias = torch.cat(
@@ -807,6 +813,10 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         Net(network_layout, sim_params, device),
         device)
     save_untrained_network(foldername, filename, net)
+
+    # verify gradients of the net
+    print("gradient check started")
+    net.verify_gradient(network_layout["n_inputs"], device)
 
     print("loss function")
     criterion = utils.GetLoss(training_params, 
