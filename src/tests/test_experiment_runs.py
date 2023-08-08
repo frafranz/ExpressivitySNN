@@ -13,6 +13,7 @@ class TestExperiment(unittest.TestCase):
         # set up datasets, configs
         dataset = "xor"
         neuron_params = {
+            "activation": "linear",
             "g_leak": 1.0,
             "leak": 0.0,
             "tau_syn": 1.0,

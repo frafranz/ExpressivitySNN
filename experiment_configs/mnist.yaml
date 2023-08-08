@@ -1,5 +1,6 @@
 dataset: mnist
 neuron_params:
+  activation: alpha_equaltime
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0
@@ -33,7 +34,6 @@ training_params:
   torch_seed: 2345678
   training_noise: {mean: 0.0, std_dev: 0.30}
   use_forward_integrator: true
-  use_hicannx: false
   weight_bumping_exp: true
   weight_bumping_targeted: true
   weight_bumping_value: 0.0005

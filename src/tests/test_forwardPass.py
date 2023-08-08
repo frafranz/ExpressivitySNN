@@ -30,6 +30,7 @@ weights_std = weights_mean * 4.
 weights_normal = True
 
 sim_params_eventbased = {
+    'activation': 'linear',
     'leak': 0.,
     'g_leak': 1.,
     'threshold': 1.,

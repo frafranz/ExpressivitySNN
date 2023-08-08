@@ -1,5 +1,4 @@
 #!python3
-import numba
 import numpy as np
 import os.path as osp
 import sys
@@ -9,8 +8,6 @@ import torch.nn
 import torch.autograd
 
 torch.set_default_dtype(torch.float64)
-
-import src.utils_spiketime_linear as utils_spiketime # to make use of our linear activation model
 
 
 class EqualtimeFunctionEventbased(torch.autograd.Function):
@@ -37,6 +34,15 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         sorted_weights[mask_of_inf_spikes] = 0. # TODO: why no clone, detach for weights? (means setting them to 0 is actually part of the comp. graph?)
 
         output_spikes = to_device(torch.ones(input_weights.size()) * np.inf, device) # prepares the array for the output spikes on the device
+
+        if neuron_params['activation']=='linear':
+            import src.utils_spiketime_linear as utils_spiketime # use our linear activation model
+        elif neuron_params['activation']=='alpha_equaltime':
+            import src.utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
+        elif neuron_params['activation']=='alpha_doubletime':
+            import src.utils_spiketime_dt as utils_spiketime # use the modified alpha activation as in Goeltz et al
+        else:
+            raise NotImplementedError(f"optimizer {neuron_params['activation']} not implemented")
 
         tmp_output = utils_spiketime.get_spiketime(
             sorted_spikes_masked,
@@ -76,6 +82,15 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         batch_size = len(input_spikes)
         number_inputs = input_weights.size()[0]
         number_outputs = input_weights.size()[1]
+
+        if ctx.sim_params['activation']=='linear':
+            import src.utils_spiketime_linear as utils_spiketime # use our linear activation model
+        elif ctx.sim_params['activation']=='alpha_equaltime':
+            import src.utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
+        elif ctx.sim_params['activation']=='alpha_doubletime':
+            import src.utils_spiketime_dt as utils_spiketime # use the modified alpha activation as in Goeltz et al
+        else:
+            raise NotImplementedError(f"optimizer {ctx.sim_params['activation']} not implemented")
 
         dw_ordered, dt_ordered = utils_spiketime.get_spiketime_derivative(
             sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes) # TODO: also retrieve dtheta, dd later
@@ -140,7 +155,7 @@ class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
     @staticmethod
     def forward(ctx,
                 input_spikes, input_weights,
-                sim_params, device):
+                sim_params, device, output_times=None):
         """use a simple euler integration, then compare with a threshold to determine spikes"""
         batch_size, input_features = input_spikes.shape
         _, output_features = input_weights.shape

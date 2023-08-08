@@ -9,7 +9,7 @@ class TestEqualtimeLayer(unittest.TestCase):
     def test_init(self):
         input_features = 2
         output_features = 3
-        sim_params = {'use_forward_integrator': False}
+        sim_params = {'use_forward_integrator': False, 'activation': 'linear'}
         weights_init = (2, 1) # this uses random weight initialization
         device = "cpu"
         bias = 0 # number of bias inputs
@@ -18,7 +18,7 @@ class TestEqualtimeLayer(unittest.TestCase):
     def test_forward(self):
         input_features = 2
         output_features = 3
-        sim_params = {'use_forward_integrator': False,"threshold": 1.0}
+        sim_params = {'use_forward_integrator': False,'threshold': 1.0, 'activation': 'linear'}
         weights_init = torch.tensor([[1.,3.,1.], [3.,1.,0.]]) # n_in x n_out
         device = "cpu"
         bias = 0 # number of bias inputs
