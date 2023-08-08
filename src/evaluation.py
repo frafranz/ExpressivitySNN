@@ -5,12 +5,9 @@ import matplotlib.gridspec as mpl_gs
 import numpy as np
 import os
 import os.path as osp
-import time
 import torch
-import yaml
 
-import training
-import utils
+import utils, training
 
 
 def run_inference(dirname, filename, datatype, dataset, untrained, reference, device=None,
@@ -44,11 +41,6 @@ def run_inference(dirname, filename, datatype, dataset, untrained, reference, de
     print('### Running in inference mode ###')
 
     # print(training_params)
-    if not reference:
-        if training_params['use_hicannx'] and \
-           os.environ.get('SLURM_HARDWARE_LICENSES') is None:
-            print("#### to evaluate epochs on HX, execute on hardware (with 'srun --partition cube --wafer ...')")
-            return (None, ) * (2 if not return_all else 4)
     if wholeset:
         batch_size = len(dataset)
     else:
@@ -162,7 +154,6 @@ def confusion_matrix(datatype, dataset, dirname='tmp', filename='', untrained=Fa
                                                              untrained, reference, device, net=net)
     if outputs is None and labels is None:
         return
-    # this can not run inference on hicannx currently
     num_labels = len(np.unique(labels))
     if reference:
         selected_classes = outputs.argmax(1)
@@ -333,8 +324,6 @@ def weight_histograms(dirname='tmp', filename='', show=False, device=None):
     if device is None:
         device = torch.device('cpu')
     net = utils.network_load(dirname, filename, device)
-    if net.use_hicannx and hasattr(net, '_ManagedConnection'):
-        net._ManagedConnection.__exit__()
     if osp.isfile(dirname + "/" + filename + '_untrained_network.pt'):
         net_untrained = utils.network_load(dirname, filename + '_untrained', device)
     elif osp.isfile(dirname + '/../' + filename + '_untrained_network.pt'):

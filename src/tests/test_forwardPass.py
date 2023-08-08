@@ -11,9 +11,7 @@ import sys
 import torch
 import unittest
 
-import datasets
-import training
-import utils
+from src import utils
 
 
 num_input = 120

@@ -5,13 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import os.path as osp
-import shutil
 import subprocess
-import sys
 import torch
 import yaml
 
-import utils
+from src import utils
 
 torch.set_default_dtype(torch.float64)
 
@@ -57,32 +55,6 @@ class Net(torch.nn.Module):
         self.rounding_precision = sim_params.get('rounding_precision')
         self.rounding = self.rounding_precision not in (None, False)
         self.sim_params = sim_params
-        self.use_hicannx = sim_params.get('use_hicannx', False)
-
-        if self.use_hicannx:
-            with open('py/hx_settings.yaml') as f:
-                self.hx_settings = yaml.load(f, Loader=yaml.SafeLoader)[
-                    os.environ.get('SLURM_HARDWARE_LICENSES')]
-
-            self.hx_settings['retries'] = 5
-            self.hx_settings['single_simtime'] = 30.
-            self.hx_settings['intrinsic_timescale'] = 1e-6
-            self.hx_settings['scale_times'] = self.hx_settings['taum'] * self.hx_settings['intrinsic_timescale']
-
-            if self.rounding:
-                self.rounding_precision = max(self.rounding,
-                                              1. / self.hx_settings['scale_weights'])
-            else:
-                self.rounding_precision = 1. / self.hx_settings['scale_weights']
-                self.rounding = True
-
-            if 'clip_weights_max' in self.sim_params and self.sim_params['clip_weights_max'] not in (None, False):
-                self.sim_params['clip_weights_max'] = min(self.sim_params['clip_weights_max'],
-                                                          63 / self.hx_settings['scale_weights'])
-            else:
-                self.sim_params['clip_weights_max'] = 63 / self.hx_settings['scale_weights']
-
-            self.init_hicannx(device)
 
         if self.rounding:
             print(f"#### Rounding the weights to precision {self.rounding_precision}")
@@ -94,183 +66,12 @@ class Net(torch.nn.Module):
         print(test)
         return
 
-    def __del__(self):
-        if self.use_hicannx and hasattr(self, '_ManagedConnection'):
-            self._ManagedConnection.__exit__()
-
-    def init_hicannx(self, device):
-        assert np.all(np.array(self.n_biases[1:]) == 0), "for now, on HX no bias in any but first layer is possible"
-
-        self.hx_record_neuron = None
-        self.hx_record_target = "membrane"
-        self.plot_rasterSimvsEmu = False
-        self.plot_raster = False
-
-        self.largest_possible_batch = 0
-        self.fast_eval = False
-        self._record_timings = False
-        self._record_power = False
-
-        import pylogging
-        pylogging.reset()
-        pylogging.default_config(
-            level=pylogging.LogLevel.WARN,
-            fname="",
-            # level=pylogging.LogLevel.DEBUG,
-            # format='%(levelname)-6s%(asctime)s,%(msecs)03d %(name)s  %(message)s',
-            print_location=False,
-            color=True,
-            date_format="RELATIVE")
-
-        # import modified backend based on strobe backend from SB and BC
-        import fastanddeep.fd_backend
-        import pyhxcomm_vx as hxcomm
-        self._ManagedConnection = hxcomm.ManagedConnection()
-        connection = self._ManagedConnection.__enter__()
-
-        self.hx_backend = fastanddeep.fd_backend.FandDBackend(
-            connection=connection,
-            structure=[self.n_inputs + self.n_biases[0]] + self.layer_sizes,
-            calibration=self.hx_settings['calibration'],
-            synapse_bias=self.hx_settings['synapse_bias'],
-        )
-
-        self.hx_backend.configure()
-
-        if 'calibration_custom' in self.hx_settings:
-            self.hx_backend.config_postcalib(self.hx_settings['calibration_custom'])
-
-        self.hx_lastsetweights = [torch.full(l.weights.data.shape, -64) for l in self.layers]
-        self.write_weights_to_hicannx()
+    def clip_weights(self):
+        if self.sim_params['clip_weights_max']:
+            for i, layer in enumerate(self.layers):
+                maxweight = self.sim_params['clip_weights_max']
+                self.layers[i].weights.data = torch.clamp(layer.weights.data, -maxweight, maxweight)
         return
-
-    def stimulate_hx(self, inpt_batch):
-        if self._record_timings:
-            timer = utils.TIMER("==")
-        num_batch, num_inp = inpt_batch.shape
-        # in case we have a batch that is too long do slice consecutively
-        if self.largest_possible_batch > 0 and num_batch > self.largest_possible_batch:
-            return_value = [[]] * self.n_layers
-            iters = int(np.ceil(num_batch / self.largest_possible_batch))
-            print(f"Splitting up batch of size {num_batch} into {iters} "
-                  f"batches of largest size {self.largest_possible_batch}")
-            for i in range(iters):
-                tmp = self.stimulate_hx(
-                    inpt_batch[i * self.largest_possible_batch: (i + 1) * self.largest_possible_batch])
-                for j, l in enumerate(tmp):
-                    if i == 0:
-                        return_value[j] = [l]
-                    else:
-                        return_value[j].append(l)
-            return [torch.cat(l, dim=0) for l in return_value]
-
-        # create one long spiketrain of batch
-        spiketrain, simtime = utils.hx_spiketrain_create(
-            inpt_batch.cpu().detach().numpy(),
-            self.hx_settings['single_simtime'],
-            self.hx_settings['scale_times'],
-            np.arange(num_batch).reshape((-1, 1)).repeat(num_inp, 1),
-            np.empty_like(inpt_batch.cpu(), dtype=int),
-        )
-        # remove infs from spiketrain
-        spiketrain = utils.hx_spiketrain_purgeinf(spiketrain)
-        if self._record_timings:
-            timer.time("spiketrain creation&purging")
-        # pass inputs to hicannx
-        if self.hx_record_neuron is not None:
-            self.hx_backend.set_readout(self.hx_record_neuron, target=self.hx_record_target)
-        retries = self.hx_settings['retries']
-        while retries > 0:
-            if self._record_timings:
-                timer.time("shit")
-            spikes_all, trace = self.hx_backend.run(
-                duration=simtime,
-                input_spikes=[spiketrain],
-                record_madc=(self.hx_record_neuron is not None),
-                measure_power=self._record_power,
-                fast_eval=self.fast_eval,
-                record_timings=self._record_timings,
-            )
-            if self._record_timings:
-                timer.time("hx_backend.run")
-                print("==time on chip should be "
-                      f"{self.hx_settings['single_simtime'] * self.hx_settings['scale_times'] * 1e4}")
-            spikes_all = [s[0] for s in spikes_all]
-            # repeat if sensibility check (first and last layer) not passed (if fast_eval just go ahead)
-            if self.fast_eval or ((len(spikes_all[0]) == 0 or spikes_all[0][:, 0].max() < simtime) and
-                                  (len(spikes_all[-1]) == 0 or spikes_all[-1][:, 0].max() < simtime)):
-                if not self.fast_eval:
-                    last_spike = max(spikes_all[0][:, 0]) if len(spikes_all[0]) > 0 else 0.
-                    # print(f"last_spike occurs as {last_spike} for simtime {simtime}")
-                    if simtime - last_spike > 0.001:
-                        # in test we have runs without output spikes
-                        if sys.argv[0][:5] != 'test_':
-                            # raise Exception("seems to be that batch wasn't fully computed")
-                            pass
-                    # print(np.unique(spikes_l[:, 1]))
-                    # sys.exit()
-                break
-            retries -= 1
-        else:
-            raise Exception("FPGA stalled and retries were exceeded")
-
-        # save trace if recorded
-        if self.hx_record_neuron is not None:
-            # get rid of error values (FPGA fail or sth)
-            mask_trace = (trace[:, 0] == 0)
-            if mask_trace.sum() > 0:
-                print(f"#### trace of neuron {self.hx_record_neuron} "
-                      f"received {mask_trace.sum()} steps of value 0")
-                trace = trace[np.logical_not(mask_trace)]
-            self.trace = trace
-
-        # disect spiketrains (with numba it looks a bit complicated)
-        return_value = []
-        if self._record_timings:
-            timer.time("stuff")
-        for i, spikes in enumerate(spikes_all):
-            # if fast eval only label layer, otherwise all
-            if not self.fast_eval or i == len(spikes_all) - 1:
-                # need to explicitly sort
-                spikes_t, spikes_id = spikes[:, 0], spikes[:, 1].astype(int)
-                sorting = np.argsort(spikes_t)
-                times_hw = torch.tensor(utils.hx_spiketrain_disect(
-                    spikes_t[sorting], spikes_id[sorting], self.hx_settings['single_simtime'],
-                    num_batch, self.layer_sizes[i],
-                    np.full((num_batch, self.layer_sizes[i]), np.inf, dtype=float),
-                    self.hx_settings['scale_times']))
-                return_value.append(times_hw)
-            else:
-                return_value.append(torch.zeros(num_batch, self.layer_sizes[i]))
-        if self._record_timings:
-            timer.time("spiketrain disecting")
-        return return_value
-
-    def write_weights_to_hicannx(self):
-        if not self.use_hicannx:
-            if self.sim_params['clip_weights_max']:
-                for i, layer in enumerate(self.layers):
-                    maxweight = self.sim_params['clip_weights_max']
-                    self.layers[i].weights.data = torch.clamp(layer.weights.data, -maxweight, maxweight)
-            return
-
-        maxweight = 63 / self.hx_settings['scale_weights']
-        weights_towrite = []
-        weights_changed = False
-        for i in range(self.n_layers):
-            # contain weights in range accessible on hw
-            self.layers[i].weights.data = torch.clamp(self.layers[i].weights.data, -maxweight, maxweight)
-            # prepare weights for writing
-            w_tmp = self.round_weights(
-                self.layers[i].weights.data, 1. / self.hx_settings['scale_weights']
-            ).cpu().detach().numpy()
-            w_tmp = (w_tmp * self.hx_settings['scale_weights']).astype(int)
-            weights_towrite.append(w_tmp)
-            if np.any(w_tmp != self.hx_lastsetweights[i]):
-                weights_changed = True
-
-        if weights_changed:
-            self.hx_backend.write_weights(*weights_towrite)
 
     def forward(self, input_times):
         # When rounding we need to save and manipulate weights before forward pass, and after
@@ -280,56 +81,20 @@ class Net(torch.nn.Module):
                 float_weights.append(layer.weights.data)
                 layer.weights.data = self.round_weights(layer.weights.data, self.rounding_precision)
 
-        if not self.use_hicannx:
-            # below, the actual pass through the layers of the network is defined, including the bias terms
-            hidden_times = []
-            for i in range(self.n_layers):
-                input_times_including_bias = torch.cat(
-                    (input_times,
-                     self.biases[i].view(1, -1).expand(len(input_times), -1)),
-                    1)
-                output_times = self.layers[i](input_times_including_bias)
-                if not i == (self.n_layers - 1):
-                    hidden_times.append(output_times)
-                    input_times = output_times
-                else:
-                    label_times = output_times
-            return_value = label_times, hidden_times
-        else:
-            if not self.fast_eval:
-                input_times_including_bias = torch.cat(
-                    (input_times,
-                     self.biases[0].view(1, -1).expand(len(input_times), -1)),
-                    1)
+        # below, the actual pass through the layers of the network is defined, including the bias terms
+        hidden_times = []
+        for i in range(self.n_layers):
+            input_times_including_bias = torch.cat(
+                (input_times,
+                    self.biases[i].view(1, -1).expand(len(input_times), -1)),
+                1)
+            output_times = self.layers[i](input_times_including_bias)
+            if not i == (self.n_layers - 1):
+                hidden_times.append(output_times)
+                input_times = output_times
             else:
-                input_times_including_bias = input_times
-
-            if self._record_timings:
-                timer = utils.TIMER()
-            spikes_all_hw = self.stimulate_hx(input_times_including_bias)
-            if self._record_timings:
-                timer.time("net.stimulate_hx")
-
-            # pass to layers pro forma to enable easy backward pass
-            if not self.fast_eval:
-                hidden_times = []
-                for i in range(self.n_layers):
-                    input_times_including_bias = torch.cat(
-                        (input_times,
-                         self.biases[i].view(1, -1).expand(len(input_times), -1)),
-                        1)
-                    output_times = self.layers[i](
-                        input_times_including_bias,
-                        output_times=utils.to_device(spikes_all_hw[i], self.device))
-                    if not i == (self.n_layers - 1):
-                        hidden_times.append(output_times)
-                        input_times = output_times
-                    else:
-                        label_times = output_times
-                return_value = label_times, hidden_times
-            else:
-                label_times = spikes_all_hw.pop(-1)
-                return_value = label_times, spikes_all_hw
+                label_times = output_times
+        return_value = label_times, hidden_times
 
         if self.rounding and not self.fast_eval:
             for layer, floats in zip(self.layers, float_weights):
@@ -447,21 +212,7 @@ def save_untrained_network(dirname, filename, net):
     if not path[-1] == '/':
         path += '/'
     # save network
-    if not net.use_hicannx:
-        torch.save(net, path + filename + '_untrained_network.pt')
-    else:
-        tmp_backend = net.hx_backend
-        tmp_MC = net._ManagedConnection
-        del net.hx_backend
-        del net._ManagedConnection
-        torch.save(net, path + filename + '_untrained_network.pt')
-        net.hx_backend = tmp_backend
-        net._ManagedConnection = tmp_MC
-        # save hardware licence to identify the used hicann
-        with open(path + filename + '_hw_licences.txt', 'w') as f:
-            f.write(os.environ.get('SLURM_HARDWARE_LICENSES'))
-        # save current calib settings
-        shutil.copy(osp.join('py', 'hx_settings.yaml'), path + '/hw_settings.yaml')
+    torch.save(net, path + filename + '_untrained_network.pt')
     return
 
 
@@ -503,22 +254,8 @@ def save_data(dirname, filename, net, label_weights, train_losses, train_accurac
     except FileExistsError:
         print("Directory ", dirname, " already exists")
     # save network
-    if not net.use_hicannx:
-        torch.save(net, dirname + filename + '_network.pt')
-    else:
-        tmp_backend = net.hx_backend
-        tmp_MC = net._ManagedConnection
-        del net.hx_backend
-        del net._ManagedConnection
-        torch.save(net, dirname + filename + '_network.pt')
-        net.hx_backend = tmp_backend
-        net._ManagedConnection = tmp_MC
-        # save hardware licence to identify the used hicann
-        with open(dirname + filename + '_hw_licences.txt', 'w') as f:
-            f.write(os.environ.get('SLURM_HARDWARE_LICENSES'))
-        # save current calib settings
-        with open(dirname + '/hx_settings.yaml', 'w') as f:
-            yaml.dump({os.environ.get('SLURM_HARDWARE_LICENSES'): net.hx_settings}, f)
+    torch.save(net, dirname + filename + '_network.pt')
+
     # save training result
     np.save(dirname + filename + '_label_weights_training.npy', label_weights)
     np.save(dirname + filename + '_train_losses.npy', train_losses)
@@ -675,7 +412,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                 optimizer.step()
                 # on hardware we need extra step to write weights
                 train_loss.append(loss.item())
-            net.write_weights_to_hicannx()
+            net.clip_weights()
             num_correct += len(label_times[selected_classes == labels])
             num_shown += len(labels)
             tmp_training_progress.append(len(label_times[selected_classes == labels]) / len(labels))
@@ -783,7 +520,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     # create sim params
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
-                            'rounding_precision', 'use_hicannx', 'max_dw_norm',
+                            'rounding_precision', 'max_dw_norm',
                             'clip_weights_max']
                   }
     sim_params.update(neuron_params)
@@ -815,8 +552,8 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     save_untrained_network(foldername, filename, net)
 
     # verify gradients of the net
-    print("gradient check started")
-    net.verify_gradient(network_layout["n_inputs"], device)
+    # print("gradient check started")
+    # net.verify_gradient(network_layout["n_inputs"], device)
 
     print("loss function")
     criterion = utils.GetLoss(training_params, 
@@ -904,10 +641,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
                   epoch_dir=(True, e_end))
 
         # evaluate on test set
-        if training_params['use_hicannx']:
-            return_input = True
-        else:
-            return_input = False
+        return_input = False
         # run again on training set (for spiketime saving)
         loss, final_train_accuracy, final_train_outputs, final_train_labels, final_train_inputs = validation_step(
             net, criterion, loader_train, device, return_input=return_input)
@@ -970,7 +704,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     # create sim params
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
-                            'rounding_precision', 'use_hicannx', 'max_dw_norm',
+                            'rounding_precision', 'max_dw_norm',
                             'clip_weights_max']
                   }
     sim_params.update(neuron_params)
@@ -1074,10 +808,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
                   epoch_dir=(True, e_end))
 
         # evaluate on test set
-        if training_params['use_hicannx']:
-            return_input = True
-        else:
-            return_input = False
+        return_input = False
         # run again on training set (for spiketime saving)
         loss, final_train_accuracy, final_train_outputs, final_train_labels, final_train_inputs = validation_step(
             net, criterion, loader_train, device, return_input=return_input)

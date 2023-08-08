@@ -1,7 +1,6 @@
 #!python3
 import numba
 import numpy as np
-import os
 import os.path as osp
 import sys
 import time
@@ -11,14 +10,14 @@ import torch.autograd
 
 torch.set_default_dtype(torch.float64)
 
-import utils_spiketime_linear as utils_spiketime # to make use of our linear activation model
+import src.utils_spiketime_linear as utils_spiketime # to make use of our linear activation model
 
 
 class EqualtimeFunctionEventbased(torch.autograd.Function):
     @staticmethod
     def forward(ctx,
                 input_spikes, input_weights,
-                neuron_params, device, output_times=None):
+                neuron_params, device):
         """Class that calculates the EventBased spikes, and provides backward function
 
         Arguments:
@@ -26,8 +25,6 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
             input_spikes, input_weights: input that is used for calculations
             neuron_params: constants used in calculation
             device: torch specifics, for GPU use
-            output_times: used only in combination with HicannX, that inherits the backward
-                pass from this class, see below for details
         """
         # create causal set
         sort_indices = input_spikes.argsort(1)
@@ -77,8 +74,8 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         propagated_error[torch.isnan(propagated_error)] = 0 # shape of propagated error is n_batch x n_post
 
         batch_size = len(input_spikes)
-        number_inputs = input_weights.size()[0] # BUG: what about batch size? check where input_weights are saved
-        number_outputs = input_weights.size()[1] # dito
+        number_inputs = input_weights.size()[0]
+        number_outputs = input_weights.size()[1]
 
         dw_ordered, dt_ordered = utils_spiketime.get_spiketime_derivative(
             sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes) # TODO: also retrieve dtheta, dd later
@@ -143,7 +140,7 @@ class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
     @staticmethod
     def forward(ctx,
                 input_spikes, input_weights,
-                sim_params, device, output_times=None):
+                sim_params, device):
         """use a simple euler integration, then compare with a threshold to determine spikes"""
         batch_size, input_features = input_spikes.shape
         _, output_features = input_weights.shape
@@ -229,20 +226,6 @@ class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
         return output_spikes
 
 
-class EqualtimeFunctionHicannx(EqualtimeFunctionEventbased):
-    @staticmethod
-    def forward(ctx,
-                input_spikes, input_weights,
-                sim_params, device, output_times):
-        """output spikes are determined by the hardware"""
-        ctx.sim_params = sim_params
-        ctx.device = device
-        ctx.save_for_backward(
-            input_spikes, input_weights, output_times)
-
-        return output_times.clone()
-
-
 class EqualtimeLayer(torch.nn.Module):
     def __init__(self, input_features, output_features, sim_params, weights_init,
                  device, bias=0):
@@ -276,25 +259,17 @@ class EqualtimeLayer(torch.nn.Module):
             assert weights_init.shape == (input_features + bias, output_features)
             self.weights.data = weights_init
 
-        self.use_hicannx = sim_params.get('use_hicannx', False)
-
     def forward(self, input_times, output_times=None):
         # depending on configuration use either eventbased, integrator or the hardware
-        if not self.use_hicannx:
-            assert output_times is None
-            if self.use_forward_integrator:
-                return EqualtimeFunctionIntegrator.apply(input_times, self.weights,
-                                                         self.sim_params,
-                                                         self.device)
-            else:
-                return EqualtimeFunctionEventbased.apply(input_times, self.weights,
-                                                         self.sim_params,
-                                                         self.device)
+        assert output_times is None
+        if self.use_forward_integrator:
+            return EqualtimeFunctionIntegrator.apply(input_times, self.weights,
+                                                        self.sim_params,
+                                                        self.device)
         else:
-            return EqualtimeFunctionHicannx.apply(input_times, self.weights,
-                                                  self.sim_params,
-                                                  self.device,
-                                                  output_times)
+            return EqualtimeFunctionEventbased.apply(input_times, self.weights,
+                                                        self.sim_params,
+                                                        self.device)
 
 
 def bias_inputs(number_biases, t_bias=[0.05]):
@@ -303,99 +278,10 @@ def bias_inputs(number_biases, t_bias=[0.05]):
     return torch.tensor(times)
 
 
-@numba.jit(nopython=True, parallel=True, cache=True)
-def hx_spiketrain_purgeinf(spiketrain):
-    return spiketrain[spiketrain[:, 0] < np.inf]
-
-
-@numba.jit(nopython=True, parallel=True, cache=True)
-def hx_spiketrain_create(batch, single_simtime, scale_times, offsetter, per_pattern_sort):
-    """thread minibatch by offsetting patterns. return ordered spiketrain"""
-    num_batch, num_neur = batch.shape
-    # first dimension is batch_id, along this offset is implemented
-    long_input_times = batch + offsetter * single_simtime
-
-    # create spiketrain out of input times (aka matrix of (neuron id, spike times)
-    spiketrain = np.zeros((num_batch * num_neur, 2))
-
-    # sorting, done in parallel: each pattern can be sorted individually
-    for i in numba.prange(batch.shape[0]):
-        sorting = np.argsort(long_input_times[i, :])
-        spiketrain[i * num_neur:(i + 1) * num_neur, 1] = sorting  # neuron ids
-        spiketrain[
-            i * num_neur:(i + 1) * num_neur, 0
-        ] = long_input_times[i][sorting] * scale_times
-
-    return spiketrain, num_batch * single_simtime * scale_times
-
-
-@numba.jit(nopython=True, parallel=True, cache=True)
-def hx_spiketrain_disect(spikes_t, spikes_id, single_simtime, num_batch, num_neurons, first_spikes, scale_times):
-    """turns spiketrain into batched tensor
-
-    i.e. slicing with single_simtime, using only first spikes.
-    spikes times (t) and ids are given separatley for jitting"""
-    def get_spike_slices(spikes_t, spikes_id, num_slices, time_per_slice):
-        """
-        Spikes array is expected to be sorted by spiketime!
-        Returns:
-            Iterator over (neuron_id, spiketime) slices where neuron_id[i] fired at
-            spiketime[i].
-        """
-        idx_batch = np.arange(num_slices)
-        idx_start = np.searchsorted(
-            spikes_t, idx_batch * time_per_slice, side="left"
-        )
-        idx_stop = np.searchsorted(
-            spikes_t, (idx_batch + 1) * time_per_slice, side="left"
-        )
-        lst = []
-        for i_start, i_stop in zip(idx_start, idx_stop):
-            lst.append((
-                spikes_id[i_start:i_stop],
-                spikes_t[i_start:i_stop]))
-        return lst
-
-    # spiketrain = spiketrain[np.argsort(spiketrain[:, 0])]
-    hw_simtime = single_simtime * scale_times
-    # iterating over the slices
-    for i_batch, (neuron_ids, spike_times) in enumerate(
-        get_spike_slices(spikes_t, spikes_id, num_batch, hw_simtime)
-    ):
-        spike_times -= i_batch * hw_simtime
-        # go through all spike (id, time) pairs in that slice
-        for n_id, t in zip(neuron_ids, spike_times):
-            # if id is sensible, and given time is earlier then registered, use it
-            if n_id >= 0 and n_id < num_neurons:
-                first_spikes[i_batch, n_id] = min(first_spikes[i_batch, n_id], t)
-    return first_spikes / scale_times
-
-
 def network_load(path, basename, device):
     net = to_device(torch.load(osp.join(path, basename + "_network.pt"),
                                map_location=device),
                     device)
-    if net.use_hicannx:
-        error = ""
-        if 'SLURM_HARDWARE_LICENSES' not in os.environ:
-            error = "### some evaluations need hw access, run on the specific hw"
-        # verify we are on the correct hicann
-        if not osp.isfile(osp.join(path, basename + '_hw_licences.txt')):
-            error = "### It seems you want to continue software training on hardware"
-        else:
-            with open(osp.join(path, basename + '_hw_licences.txt'), 'r') as f:
-                hw_licences = f.read()
-            if hw_licences != os.environ.get('SLURM_HARDWARE_LICENSES'):
-                error = ("You have to continue training on the same chip, instead got: "
-                         f"licence read from file '{hw_licences}', from env "
-                         f"'{os.environ.get('SLURM_HARDWARE_LICENSES')}'")
-
-        if error == "":
-            net.hx_lastsetweights = [torch.full(l.weights.data.shape, -64) for l in net.layers]
-            net.init_hicannx(device)
-        else:
-            print(f"#### untrained network loaded -> not initialising, also got error:\n{error}")
-
     net.device = get_default_device()
     return net
 

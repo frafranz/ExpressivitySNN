@@ -35,7 +35,7 @@ def get_spiketime(input_spikes, input_weights, neuron_params, device):
     input_spikes = input_spikes.view(n_batch, 1, n_presyn)
 
     # added to avoid NaN during division when weights are 0 TODO: does a negative value make sense here? or should they be clamped to > 0?
-    eps = 1e-6
+    eps = 1e-10
     summed_weights = torch.sum(weights_split, 1) + eps # here we sum over the cols of the tridiagonal matrix, i.e. first only one, second two etc.
     a1 = torch.matmul(input_spikes, weights_split).squeeze(1) # n_batch x 1 x n_pre times n_batch x n_pre x (n_pre n_post)
     # the result has dimensions n_batch x 1 x (n_pre n_post) (same for next row, later casted to n_batch x n_pre x n_post)
@@ -68,9 +68,9 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
 
     input_spikes = input_spikes.view(n_batch, 1, n_presyn)
 
-    eps = 1e-6
+    eps = 1e-10
     summed_weights = torch.sum(causal_weights, 1, keepdim=True) + eps # here we sum only over contributing (causal) weights
-    dw = output_minus_input / summed_weights # for weight gradient, need shape n_batch x n_pre x n_post (since t_v only depends on w_uv) # TODO: would add in delay here
+    dw = -output_minus_input / summed_weights # for weight gradient, need shape n_batch x n_pre x n_post (since t_v only depends on w_uv) # TODO: would add in delay here
     dt = causal_weights / summed_weights
     # dd = causal_weights / summed_weights # also provide derivative wrt delay
     # dtheta = 1./summed_weights
