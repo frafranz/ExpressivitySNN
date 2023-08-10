@@ -8,7 +8,6 @@ from pprint import pprint
 import sys
 import time
 import torch
-import yaml
 
 import training
 import datasets

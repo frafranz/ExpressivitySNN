@@ -1,6 +1,6 @@
 dataset: mnist
 neuron_params:
-  activation: linear
+  activation: alpha_equaltime
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0

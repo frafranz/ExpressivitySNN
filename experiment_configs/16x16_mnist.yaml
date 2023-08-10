@@ -1,12 +1,14 @@
 dataset: 16x16_mnist
 neuron_params:
-  activation: alpha_equaltime
+  activation: linear
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0
   threshold: 1.0
 network_layout:
   bias_times: []
+  delay_means : [0.0, 0.0]
+  delay_stdevs: [0.0, 0.0]
   layer_sizes: [128, 10]
   n_biases: [0, 0]
   n_inputs: 256
@@ -36,6 +38,7 @@ training_params:
   resolution: 0.01
   sim_time: 3.0
   torch_seed: 2345
+  train_delay: false
   training_noise: {mean: 0.0, std_dev: 0.3}
   use_forward_integrator: false
   weight_bumping_exp: true

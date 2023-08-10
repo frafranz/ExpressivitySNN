@@ -9,7 +9,8 @@ import subprocess
 import torch
 import yaml
 
-from src import utils
+# from src import utils # TODO: harmonize imports
+import utils
 
 torch.set_default_dtype(torch.float64)
 
@@ -28,6 +29,8 @@ class Net(torch.nn.Module):
         self.n_biases = network_layout['n_biases']
         self.weight_means = network_layout['weight_means']
         self.weight_stdevs = network_layout['weight_stdevs']
+        self.delay_means = network_layout['delay_means']
+        self.delay_stdevs = network_layout['delay_stdevs']
         self.device = device
 
         if 'bias_times' in network_layout.keys():
@@ -44,11 +47,13 @@ class Net(torch.nn.Module):
         self.layers = torch.nn.ModuleList()
         layer = utils.EqualtimeLayer(self.n_inputs, self.layer_sizes[0],
                                      sim_params, (self.weight_means[0], self.weight_stdevs[0]),
+                                     (self.delay_means[0], self.delay_stdevs[0]),
                                      device, self.n_biases[0])
         self.layers.append(layer)
         for i in range(self.n_layers - 1):
             layer = utils.EqualtimeLayer(self.layer_sizes[i], self.layer_sizes[i + 1],
                                          sim_params, (self.weight_means[i + 1], self.weight_stdevs[i + 1]),
+                                         (self.delay_means[i+1], self.delay_stdevs[i+1]),
                                          device, self.n_biases[i + 1])
             self.layers.append(layer)
 
@@ -58,12 +63,6 @@ class Net(torch.nn.Module):
 
         if self.rounding:
             print(f"#### Rounding the weights to precision {self.rounding_precision}")
-        return
-    
-    def verify_gradient(self, n_inputs, device):
-        input_times = utils.to_device(torch.rand(1,n_inputs,dtype=torch.double,requires_grad=True), device)
-        test = torch.autograd.gradcheck(self, input_times) # TODO: throws AttributeError: 'list' object has no attribute 'requires_grad'
-        print(test)
         return
 
     def clip_weights(self):
@@ -521,7 +520,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max']
+                            'clip_weights_max', 'train_delay']
                   }
     sim_params.update(neuron_params)
 
@@ -550,10 +549,6 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         Net(network_layout, sim_params, device),
         device)
     save_untrained_network(foldername, filename, net)
-
-    # verify gradients of the net
-    # print("gradient check started")
-    # net.verify_gradient(network_layout["n_inputs"], device)
 
     print("loss function")
     criterion = utils.GetLoss(training_params, 
@@ -705,7 +700,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max']
+                            'clip_weights_max', 'train_delay']
                   }
     sim_params.update(neuron_params)
 

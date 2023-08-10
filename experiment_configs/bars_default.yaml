@@ -7,6 +7,8 @@ neuron_params:
   threshold: 1.0
 network_layout:
   bias_times: []
+  delay_means : [0.0, 0.0]
+  delay_stdevs: [0.0, 0.0]
   layer_sizes: [10, 3]
   n_biases: [0, 0]
   n_inputs: 9
@@ -34,6 +36,7 @@ training_params:
   rounding_precision: false
   sim_time: 4.0
   torch_seed: 61231231
+  train_delay: false
   training_noise: false
   use_forward_integrator: false
   weight_bumping_exp: true
