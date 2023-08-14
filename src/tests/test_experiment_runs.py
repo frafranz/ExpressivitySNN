@@ -1,7 +1,7 @@
 import unittest
 import time
 
-from src import utils, training, datasets
+import utils, training, datasets
 
 
 class TestExperiment(unittest.TestCase):
@@ -26,7 +26,9 @@ class TestExperiment(unittest.TestCase):
             "n_inputs": 4,
             "n_layers": 2,
             "weight_means": [1.5, 0.5],
-            "weight_stdevs": [0.8, 0.8]
+            "weight_stdevs": [0.8, 0.8],
+            "delay_means": [0, 0],
+            "delay_stdevs": [0, 0]
         }
         training_params = {
             "alpha": 0.005,

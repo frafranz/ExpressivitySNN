@@ -11,7 +11,7 @@ import sys
 import torch
 import unittest
 
-from src import utils
+import utils
 
 
 num_input = 120
@@ -73,12 +73,14 @@ class TestIntegratorVsTimebased(unittest.TestCase):
         else:
             torch.nn.init.uniform_(weights, a=weights_mean - 2 * weights_std, b=weights_mean + 2 * weights_std)
 
+        delays = torch.zeros_like(weights)
+
         print("### generating layers")
         layer_eventbased = utils.EqualtimeLayer(
-            num_input, num_output, sim_params_eventbased, weights,
+            num_input, num_output, sim_params_eventbased, weights, delays,
             device, 0)
         layer_integrator = utils.EqualtimeLayer(
-            num_input, num_output, sim_params_integrator, weights,
+            num_input, num_output, sim_params_integrator, weights, delays,
             device, 0)
 
         def cutitdown(to_argmax, times_input, weights,

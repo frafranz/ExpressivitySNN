@@ -8,7 +8,7 @@ neuron_params:
 network_layout:
   bias_times: [0.9]
   delay_means : [0.1, 0.1]
-  delay_stdevs: [0.01, 0.01]
+  delay_stdevs: [0.1, 0.1]
   layer_sizes: [120, 3]
   n_biases: [1, 1]
   n_inputs: 4

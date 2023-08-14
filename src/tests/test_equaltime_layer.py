@@ -2,7 +2,7 @@ import unittest
 import torch
 from torch.testing import assert_close
 
-from src.utils import EqualtimeLayer
+from utils import EqualtimeLayer
 
 
 class TestEqualtimeLayer(unittest.TestCase):

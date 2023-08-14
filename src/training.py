@@ -9,7 +9,6 @@ import subprocess
 import torch
 import yaml
 
-# from src import utils # TODO: harmonize imports
 import utils
 
 torch.set_default_dtype(torch.float64)
@@ -29,8 +28,13 @@ class Net(torch.nn.Module):
         self.n_biases = network_layout['n_biases']
         self.weight_means = network_layout['weight_means']
         self.weight_stdevs = network_layout['weight_stdevs']
-        self.delay_means = network_layout['delay_means']
-        self.delay_stdevs = network_layout['delay_stdevs']
+        
+        if sim_params["train_delay"]:
+            self.delay_means = network_layout['delay_means']
+            self.delay_stdevs = network_layout['delay_stdevs']
+        else:
+            self.delay_means = [0]*self.n_layers
+            self.delay_stdevs = [0]*self.n_layers
         self.device = device
 
         if 'bias_times' in network_layout.keys():
@@ -44,6 +48,7 @@ class Net(torch.nn.Module):
         for i in range(self.n_layers):
             bias = utils.to_device(utils.bias_inputs(self.n_biases[i], self.bias_times[i]), device)
             self.biases.append(bias)
+
         self.layers = torch.nn.ModuleList()
         layer = utils.EqualtimeLayer(self.n_inputs, self.layer_sizes[0],
                                      sim_params, (self.weight_means[0], self.weight_stdevs[0]),

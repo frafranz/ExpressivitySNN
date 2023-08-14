@@ -26,38 +26,43 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         Returns:
             output_spikes:  outgoing spike times
         """
+        n_batch, n_presyn = input_spikes.shape
+        n_presyn2, n_postsyn = input_weights.shape
+        n_presyn3, n_postsyn2 = input_delays.shape
+        assert n_presyn == n_presyn2 == n_presyn3
+        assert n_postsyn == n_postsyn2
+
         # create causal set
-        sort_indices = input_spikes.argsort(1)
-        sorted_spikes = input_spikes.gather(1, sort_indices)
-        sorted_weights = input_weights[sort_indices] # works since weights have no batches, output is of shape n_batch x n_pre x n_post
-        sorted_delays = input_delays[sort_indices] # dito
+        # due to to different delays, the sorting has to be done for every output separately
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
+        sort_indices = delayed_input_spikes.argsort(1)
+        sorted_spikes = delayed_input_spikes.gather(1, sort_indices)
+        sorted_weights = torch.gather(input_weights.unsqueeze(0).expand(n_batch,-1,-1), dim=1, index=sort_indices) # output is of shape n_batch x n_pre x n_post
         # (in each batch) set weights=0 and spiketime=0 for neurons with inf spike time to prevent nans
         mask_of_inf_spikes = torch.isinf(sorted_spikes)
         sorted_spikes_masked = sorted_spikes.clone().detach() # TODO: why detach here? means that these spikes are not part of the comp. graph, i.e. not trained?
         sorted_spikes_masked[mask_of_inf_spikes] = 0.
         sorted_weights[mask_of_inf_spikes] = 0. # TODO: why no clone, detach for weights? (means setting them to 0 is actually part of the comp. graph?)
-        sorted_delays[mask_of_inf_spikes] = 0 # TODO: makes sense to also set delays to zero when there is no incoming spike
-
+        
         output_spikes = to_device(torch.ones(input_weights.size()) * np.inf, device) # prepares the array for the output spikes on the device
 
         if neuron_params['activation']=='linear':
-            import utils_spiketime_linear as utils_spiketime # use our linear activation model # TODO: harmonize imports
+            import utils_spiketime_linear as utils_spiketime # use our linear activation model
         elif neuron_params['activation']=='alpha_equaltime':
-            import src.utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
+            import utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
         elif neuron_params['activation']=='alpha_doubletime':
-            import src.utils_spiketime_dt as utils_spiketime # use the modified alpha activation as in Goeltz et al
+            import utils_spiketime_dt as utils_spiketime # use the modified alpha activation as in Goeltz et al
         else:
             raise NotImplementedError(f"optimizer {neuron_params['activation']} not implemented")
 
         tmp_output = utils_spiketime.get_spiketime(
             sorted_spikes_masked,
             sorted_weights,
-            sorted_delays,
             neuron_params, device)
 
         # compare new spike times with previous, to set all cases in which no spike would occur to inf
-        before_last_input = tmp_output < sorted_spikes.unsqueeze(-1) + sorted_delays # output cannot happen before the last required input (means we need less inputs)
-        after_next_input = tmp_output > (sorted_spikes.unsqueeze(-1) + sorted_delays).roll(-1, dims=1) # compare to next input spike, output must happen before (else we need more inputs)
+        before_last_input = tmp_output < sorted_spikes # output cannot happen before the last required input (means we need less inputs)
+        after_next_input = tmp_output > sorted_spikes.roll(-1, dims=1) # compare to next input spike, output must happen before (else we need more inputs)
         after_next_input[:, -1, :] = 0.  # last has no subsequent spike, so the output spike is always early enough
 
         # set non-causal times to inf (so that they are ignored in the min taken to find the output times)
@@ -65,19 +70,6 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         tmp_output[after_next_input] = float('inf')
 
         output_spikes, causal_set_lengths = torch.min(tmp_output, dim=1) # take output spike happening after a minimum of incoming spikes (complexity: n_pre)
-        # TODO: verify whether there is indeed only one non-infinite value in each column, else one would have to argue why the minimum is chosen here
-        # for instance negative weights could create another threshold crossing at a later time, the first should be correct? (but the computed times in case of negative weights are not precise!)
-        # TODO: should always be correct to choose the first non-infinite value in each column
-        #_, causal_set_lengths_new = torch.max(tmp_output<torch.inf, dim=1) # gives number of causal spikes each, where 0 means one spike and n means n+1 spikes
-        # print(tmp_output)
-        # print(causal_set_lengths_new)
-        # print(causal_set_lengths_new.shape)
-        # print(tmp_output.shape)
-        # causal_set_lengths_new = torch.argsort(tmp_output<torch.inf, dim=1, descending=True, stable=True) # find 
-        # TODO: this does not deal with the case where there is no output spike, i.e. time is infinite, do we need a case distinction for that? try out in notebook
-        # output_spikes_new = tmp_output.gather(1, causal_set_lengths_new) # TODO: still error here with gather
-        # from torch.testing import assert_close
-        # assert_close(output_spikes, output_spikes_new)
 
         ctx.sim_params = neuron_params
         ctx.device = device
@@ -112,19 +104,19 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         # recover saved values
         input_spikes, input_weights, input_delays, output_spikes = ctx.saved_tensors # TODO: also save thresholds
         # might be left out, since already done before saving tensors, but like this we also know the indices (need to revert later)
-        sort_indices = input_spikes.argsort(1) # find indices such that the times would be in ascending order (n_batch x n_pre)
-        sorted_spikes = input_spikes.gather(1, sort_indices)
-        sorted_weights = input_weights[sort_indices] # works since weights have no batches, output n_batch x n_pre x n_post
-        sorted_delays = input_delays[sort_indices] # dito
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
+        sort_indices = delayed_input_spikes.argsort(1)
+        sorted_spikes = delayed_input_spikes.gather(1, sort_indices)
+        n_batch = input_spikes.shape[0]
+        sorted_weights = torch.gather(input_weights.unsqueeze(0).expand(n_batch,-1,-1), dim=1, index=sort_indices) # output is of shape n_batch x n_pre x n_post
         # with missing label spikes the propagated error can be nan
         propagated_error[torch.isnan(propagated_error)] = 0 # shape of propagated error is n_batch x n_post
 
-        batch_size = len(input_spikes)
-        number_inputs = input_weights.size()[0]
-        number_outputs = input_weights.size()[1]
-
+        batch_size = input_spikes.shape[0]
+        number_inputs = input_weights.shape[0]
+        
         if ctx.sim_params['activation']=='linear':
-            import utils_spiketime_linear as utils_spiketime # use our linear activation model # TODO: harmonize
+            import utils_spiketime_linear as utils_spiketime # use our linear activation model
         elif ctx.sim_params['activation']=='alpha_equaltime':
             import utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
         elif ctx.sim_params['activation']=='alpha_doubletime':
@@ -133,15 +125,14 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
             raise NotImplementedError(f"optimizer {ctx.sim_params['activation']} not implemented")
 
         dw_ordered, dt_ordered, dd_ordered = utils_spiketime.get_spiketime_derivative(
-            sorted_spikes, sorted_weights, sorted_delays, ctx.sim_params, ctx.device, output_spikes) # TODO: also retrieve dtheta later
+            sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes) # TODO: also retrieve dtheta later
 
         # retransform it in the correct way
         dw = to_device(torch.zeros(dw_ordered.size()), ctx.device)
         dt = to_device(torch.zeros(dt_ordered.size()), ctx.device)
         dd = to_device(torch.zeros(dd_ordered.size()), ctx.device)
-        # masking: determine how to revert sorting of spike times (along dim -1), and repeat (for each output, the same input spike ordering applies)
-        mask_from_spikeordering = torch.argsort(sort_indices)[:, :, np.newaxis].repeat((1, 1, number_outputs)) 
-        
+        # masking: determine how to revert sorting of spike times (this depends on the output neuron since the delays are different!)
+        mask_from_spikeordering = torch.argsort(sort_indices, dim=1)
 
         dw = torch.gather(dw_ordered, 1, mask_from_spikeordering)
         dt = torch.gather(dt_ordered, 1, mask_from_spikeordering)
@@ -149,7 +140,7 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         # TODO: later do the same ordering steps for threshold gradients (compactify notation?)
 
         error_to_work_with = propagated_error.view(
-            propagated_error.size()[0], 1, propagated_error.size()[1]) # reshape propagated error to n_batch x 1 x n_post
+            propagated_error.shape[0], 1, propagated_error.shape[1]) # reshape propagated error to n_batch x 1 x n_post
 
         weight_gradient = dw * error_to_work_with # chain rule: weight gradient is derivative of outgoing spike times wrt weights times derivative wrt outoing spikes
         delay_gradient = dd * error_to_work_with
@@ -211,12 +202,13 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
 class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
     @staticmethod
     def forward(ctx,
-                input_spikes, input_weights,
+                input_spikes, input_weights, input_delays,
                 sim_params, device, output_times=None):
         """use a simple euler integration, then compare with a threshold to determine spikes"""
         batch_size, input_features = input_spikes.shape
         _, output_features = input_weights.shape
 
+        # TODO: ignoring delays so far
         input_transf = torch.zeros(tuple(input_spikes.shape) + (sim_params['steps'], ),
                                    device=device, requires_grad=False)
         input_times_step = (input_spikes / sim_params['resolution']).long()
