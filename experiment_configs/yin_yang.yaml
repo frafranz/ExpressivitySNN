@@ -7,8 +7,10 @@ neuron_params:
   threshold: 1.0
 network_layout:
   bias_times: [0.9]
-  delay_means : [0.1, 0.1]
-  delay_stdevs: [0.1, 0.1]
+  delay_means : [0., 0.]
+  delay_stdevs: [0., 0.]
+  threshold_means : [1, 1]
+  threshold_stdevs: [0.1, 0.1]
   layer_sizes: [120, 3]
   n_biases: [1, 1]
   n_inputs: 4
@@ -18,7 +20,8 @@ network_layout:
 training_params:
   batch_size: 150
   batch_size_eval: 200
-  enforce_cpu: False
+  enforce_cpu: True
+  enforce_mps: False
   epoch_number: 300
   epoch_snapshots: [100, 200]
   learning_rate: 0.005
@@ -36,7 +39,8 @@ training_params:
   resolution: 0.01
   sim_time: 4.0
   torch_seed: 2000
-  train_delay: true
+  train_delay: false
+  train_threshold: true
   training_noise: false
   use_forward_integrator: false
   weight_bumping_exp: true

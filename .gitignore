@@ -21,3 +21,7 @@ run_sweep.sh
 eval_experiment.sh
 debug_*.png
 .DS_Store
+live_accuracy copy 2.png
+live_accuracy copy.png
+.gitignore
+live_accuracy.png

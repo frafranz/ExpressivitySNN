@@ -35,6 +35,13 @@ class Net(torch.nn.Module):
         else:
             self.delay_means = [0]*self.n_layers
             self.delay_stdevs = [0]*self.n_layers
+
+        if sim_params["train_threshold"]:
+            self.threshold_means = network_layout['threshold_means']
+            self.threshold_stdevs = network_layout['threshold_stdevs']
+        else:
+            self.threshold_means = [sim_params['threshold']]*self.n_layers
+            self.threshold_stdevs = [0]*self.n_layers
         self.device = device
 
         if 'bias_times' in network_layout.keys():
@@ -53,12 +60,14 @@ class Net(torch.nn.Module):
         layer = utils.EqualtimeLayer(self.n_inputs, self.layer_sizes[0],
                                      sim_params, (self.weight_means[0], self.weight_stdevs[0]),
                                      (self.delay_means[0], self.delay_stdevs[0]),
+                                     (self.threshold_means[0], self.threshold_stdevs[0]),
                                      device, self.n_biases[0])
         self.layers.append(layer)
         for i in range(self.n_layers - 1):
             layer = utils.EqualtimeLayer(self.layer_sizes[i], self.layer_sizes[i + 1],
                                          sim_params, (self.weight_means[i + 1], self.weight_stdevs[i + 1]),
                                          (self.delay_means[i+1], self.delay_stdevs[i+1]),
+                                         (self.threshold_means[i+1], self.threshold_stdevs[i+1]),
                                          device, self.n_biases[i + 1])
             self.layers.append(layer)
 
@@ -271,6 +280,26 @@ def save_data(dirname, filename, net, label_weights, train_losses, train_accurac
     np.save(dirname + filename + '_std_val_outputs_sorted.npy', std_val_outputs_sorted)
     return
 
+def save_loss_plot(training_progress, trainloader, path=None):
+    save_path = 'live_accuracy.png'
+    if path:
+        save_path = os.path.join(path, 'live_accuracy.png')
+    fig, ax = plt.subplots(1, 1)
+    tmp = 1. - running_mean(training_progress, N=30)
+    ax.plot(np.arange(len(tmp)) / len(trainloader), tmp)
+    ax.set_ylim(0.005, 1.0)
+    ax.set_yscale('log')
+    ax.set_xlabel("epochs")
+    ax.set_ylabel("error [%] (running_mean of 30 batches)")
+    ax.axhline(0.30)
+    ax.axhline(0.05)
+    ax.axhline(0.01)
+    ax.set_yticks([0.01, 0.05, 0.1, 0.3])
+    ax.set_yticklabels([1, 5, 10, 30])
+    fig.savefig(save_path)
+    print("===========Saved live accuracy plot")
+    plt.close(fig)
+
 
 def save_result_spikes(dirname, filename, train_times, train_labels, train_inputs,
                        test_times, test_labels, test_inputs, epoch_dir=(False, -1)):
@@ -422,21 +451,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             tmp_training_progress.append(len(label_times[selected_classes == labels]) / len(labels))
 
             if live_plot and j % 100 == 0:
-                fig, ax = plt.subplots(1, 1)
-                tmp = 1. - running_mean(tmp_training_progress, N=30)
-                ax.plot(np.arange(len(tmp)) / len(trainloader), tmp)
-                ax.set_ylim(0.005, 1.0)
-                ax.set_yscale('log')
-                ax.set_xlabel("epochs")
-                ax.set_ylabel("error [%] (running_mean of 30 batches)")
-                ax.axhline(0.30)
-                ax.axhline(0.05)
-                ax.axhline(0.01)
-                ax.set_yticks([0.01, 0.05, 0.1, 0.3])
-                ax.set_yticklabels([1, 5, 10, 30])
-                fig.savefig('live_accuracy.png')
-                print("===========Saved live accuracy plot")
-                plt.close(fig)
+                save_loss_plot(tmp_training_progress, trainloader)
 
         if len(train_loss) > 0:
             all_train_loss.append(np.mean(train_loss))
@@ -459,7 +474,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             tmp_class_outputs = [[] for i in range(num_classes)]
             for pattern in range(len(validate_outputs)):
                 true_label = validate_labels[pattern]
-                tmp_class_outputs[true_label].append(validate_outputs[pattern].cpu().detach().numpy())
+                tmp_class_outputs[int(true_label)].append(validate_outputs[pattern].cpu().detach().numpy())
             for i in range(num_classes):
                 tmp_times = np.array(tmp_class_outputs[i])
                 tmp_times[np.isinf(tmp_times)] = np.NaN
@@ -508,9 +523,11 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         training_params['optimizer'] = 'sgd'
     if 'enforce_cpu' in training_params.keys() and training_params['enforce_cpu']:
         device = torch.device('cpu')
+    elif 'enforce_mps' in training_params.keys() and training_params['enforce_mps']:
+        device = torch.device('mps')
     else:
         device = utils.get_default_device()
-    if not device == 'cpu':
+    if not device in ['cpu', 'mps']:
         torch.cuda.manual_seed(training_params['torch_seed'])
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -525,7 +542,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay']
+                            'clip_weights_max', 'train_delay', 'train_threshold']
                   }
     sim_params.update(neuron_params)
 
@@ -591,7 +608,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         tmp_class_outputs = [[] for i in range(num_classes)]
         for pattern in range(len(validate_outputs)):
             true_label = validate_labels[pattern]
-            tmp_class_outputs[true_label].append(validate_outputs[pattern].cpu().detach().numpy())
+            tmp_class_outputs[int(true_label)].append(validate_outputs[pattern].cpu().detach().numpy())
         for i in range(num_classes):
             tmp_times = np.array(tmp_class_outputs[i])
             inf_mask = np.isinf(tmp_times)
@@ -639,6 +656,10 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
                   all_train_accuracy, all_validate_loss, all_validate_accuracy,
                   validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted,
                   epoch_dir=(True, e_end))
+        # also save the loss curve in the results folder
+        if foldername:
+            loss_plot_path = osp.join('../experiment_results', foldername, 'epoch_{}/'.format(e_end))
+            save_loss_plot(tmp_training_progress, loader_train, path=loss_plot_path)
 
         # evaluate on test set
         return_input = False
@@ -665,6 +686,10 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
               all_train_accuracy, all_validate_loss, all_validate_accuracy,
               validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted)
 
+    # also save the loss curve in the results folder
+    if foldername:
+        loss_plot_path = os.path.join('../experiment_results', foldername)
+        save_loss_plot(tmp_training_progress, loader_train, path=loss_plot_path)
     return net
 
 
@@ -690,9 +715,11 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
 
     if 'enforce_cpu' in training_params.keys() and training_params['enforce_cpu']:
         device = torch.device('cpu')
+    elif 'enforce_mps' in training_params.keys() and training_params['enforce_mps']:
+        device = torch.device('mps')
     else:
         device = utils.get_default_device()
-    if not device == 'cpu':
+    if not device in ['cpu', 'mps']:
         torch.cuda.manual_seed(training_params['torch_seed'])
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -705,7 +732,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay']
+                            'clip_weights_max', 'train_delay', 'train_threshold']
                   }
     sim_params.update(neuron_params)
 

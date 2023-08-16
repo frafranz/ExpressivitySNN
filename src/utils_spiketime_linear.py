@@ -7,13 +7,14 @@ import torch.autograd
 torch.set_default_dtype(torch.float64)
 
 
-def get_spiketime(input_spikes, input_weights, neuron_params, device):
+def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device):
     """Calculating spike times, all at once.
 
     Called from EqualtimeFunction below, for each layer.
     Dimensions are crucial:
         input weights have dimension BATCHESxNxM with N pre and M postsynaptic neurons.
         (delayed) input spikes also have dimension batchesxNxM, where the last coordinate represents the output neuron for which the input is considered
+        thresholds have dimension M, corresponding to all postsynaptic neurons
     The functions relies on the incoming spike time with their respective weights being sorted, delays between neurons are already accounted for.
 
     The return value (n_batch, n_presyn, n_postsyn) contains the time of on outgoing spike to neuron n_postsyn (for n_batch),
@@ -32,7 +33,7 @@ def get_spiketime(input_spikes, input_weights, neuron_params, device):
     weights_split[:, tmp_mask[0], tmp_mask[1], :] = 0. # mask all indices strictly below the diagonal (these won't be needed)
 
     # temporary reshape for torch reasons (view is like reshape, but ensuring that the data agree and are not copied)
-    weights_split = weights_split.view(n_batch, n_presyn, n_presyn * n_postsyn)
+    # weights_split = weights_split.view(n_batch, n_presyn, n_presyn * n_postsyn) # TODO: can be left out now?
 
     # fastest implementation: multiply delayed spike times by weights and finally sum over causal spike times
     weighted_delayed_spikes_split = (input_spikes*input_weights)[:, :, None, :]
@@ -40,22 +41,22 @@ def get_spiketime(input_spikes, input_weights, neuron_params, device):
     tmp_mask = torch.tril_indices(n_presyn, n_presyn, offset=-1)  # want diagonal thus offset once below diagonal
     weighted_delayed_spikes_split[:, tmp_mask[0], tmp_mask[1], :] = 0. # mask all indices strictly below the diagonal (these won't be needed)
     # temporary reshape for torch reasons (view is like reshape, but ensuring that the data agree and are not copied)
-    weighted_delayed_spikes_split = weighted_delayed_spikes_split.view(n_batch, n_presyn, n_presyn * n_postsyn)
+    # weighted_delayed_spikes_split = weighted_delayed_spikes_split.view(n_batch, n_presyn, n_presyn * n_postsyn) # TODO: can be left out now?
     
-    a = torch.sum(weighted_delayed_spikes_split, 1) # n_batch x (n_pre n_post)
+    a = torch.sum(weighted_delayed_spikes_split, 1) # n_batch x n_pre x n_post
     # set positive lower bound to avoid NaN during division, since a negative (or 0) sum of weights means there is no output pulse
     eps = 1e-10
     summed_weights = torch.clamp(torch.sum(weights_split, 1), min=eps) # here we sum over the cols of the tridiagonal matrix, i.e. first only one, second two etc.
     # has shape n_batch x (n_pre x n_post)
 
-    ret_val = (neuron_params['threshold']+a)/summed_weights # TODO: will later adapt to threshold theta_v
+    ret_val = (thresholds.view(1, 1, n_postsyn)+a)/summed_weights
     ret_val[summed_weights==eps] = torch.inf # if the sum of weights is negative or 0, there won't be an output spike
     ret_val = ret_val.view(n_batch, n_presyn, n_postsyn) # ensure correct shape (one possible spike time for each batch and synapse)
 
     return ret_val
 
 
-def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
+def get_spiketime_derivative(input_spikes, input_weights, thresholds, neuron_params, device,
                              output_spikes):
     """Calculating the derivatives, see above.
 
@@ -85,12 +86,15 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
         dd = causal_weights / summed_weights
     else:
         dd = torch.zeros_like(dt)
-    # dtheta = 1./summed_weights # TODO: also add threshold gradient
+    if "train_threshold" in neuron_params and neuron_params["train_threshold"]:
+        dtheta = 1. / summed_weights.expand(-1,n_presyn,-1)
+    else:
+        dtheta = torch.zeros_like(dt)
 
     # manually set the uncausal and inf output spike entries 0
     dw[mask] = 0.
     dt[mask] = 0.
     dd[mask] = 0.
-    # dtheta[mask] = 0.
+    dtheta[mask] = 0.
     
-    return dw, dt, dd #dtheta
+    return dw, dt, dd, dtheta

@@ -28,7 +28,9 @@ class TestExperiment(unittest.TestCase):
             "weight_means": [1.5, 0.5],
             "weight_stdevs": [0.8, 0.8],
             "delay_means": [0, 0],
-            "delay_stdevs": [0, 0]
+            "delay_stdevs": [0, 0],
+            "threshold_means": [1, 1],
+            "threshold_stdevs": [0, 0],
         }
         training_params = {
             "alpha": 0.005,
@@ -49,6 +51,8 @@ class TestExperiment(unittest.TestCase):
             "resolution": 0.01,
             "sim_time": 4.0,
             "torch_seed": 2000,
+            "train_delay": False,
+            "train_threshold": False,
             "training_noise": {"mean": 0.0, "std_dev": 0.2},
             "use_forward_integrator": False,
             "use_hicannx": False,
@@ -66,7 +70,7 @@ class TestExperiment(unittest.TestCase):
         dirname = None
         filename = None
         net = training.train(training_params, network_layout, neuron_params,
-                                dataset_train, dataset_val, dataset_test, dirname, filename)
+                             dataset_train, dataset_val, dataset_test, dirname, filename)
         t_end = time.perf_counter()
         duration = t_end - t_start
         print('Training {0} epochs -> duration: {1} seconds'.format(training_params['epoch_number'], duration))
