@@ -15,8 +15,8 @@ class TestSpiketimeLinear(unittest.TestCase):
             [[3.,1.,0.], [1.,3.,1.]],
             [[3.,1.,0.], [1.,3.,1.]]
         ]) # n_batch x n_in x n_out
-        input_delays = torch.zeros_like(input_weights)
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
+        input_delays = torch.zeros_like(input_weights[0])
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         neuron_params = {
             "threshold": 1.0
         }
@@ -41,10 +41,7 @@ class TestSpiketimeLinear(unittest.TestCase):
             [[3.,1.,0.], [1.,3.,1.]],
             [[3.,1.,0.], [1.,3.,1.]]
         ]) # n_batch x n_in x n_out
-        input_delays = torch.tensor([
-            [[0.1,0.05,0.3], [.01,.2,0.5]],
-            [[0.1,0.05,0.3], [.01,.2,0.5]]
-        ]) # n_batch x n_in x n_out
+        input_delays = torch.tensor([[0.1,0.05,0.3], [.01,.2,0.5]]) # n_in x n_out
         delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
         neuron_params = {
             "threshold": 1.0
@@ -70,11 +67,8 @@ class TestSpiketimeLinear(unittest.TestCase):
             [[3.,1.,0.], [1.,3.,1.]],
             [[3.,1.,0.], [1.,3.,1.]]
         ]) # n_batch x n_in x n_out
-        input_delays = torch.tensor([
-            [[0.1,0.05,0.3], [.01,.2,0.5]],
-            [[0.1,0.05,0.3], [.01,.2,0.5]]
-        ]) # n_batch x n_in x n_out
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
+        input_delays = torch.tensor([[0.1,0.05,0.3], [.01,.2,0.5]]) # n_in x n_out
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         neuron_params = {
             "threshold": 1.0
         }
@@ -97,9 +91,9 @@ class TestSpiketimeLinear(unittest.TestCase):
         """
         input_spikes = torch.tensor([[0., 0.1],[0., 0.5]]) # note: they are ordered in the wrapping function, and the weights sorted accordingly
         input_weights = torch.tensor([[[3.,1.,0.], [1.,3.,1.]],
-                                      [[3.,1.,0.], [1.,3.,1.]]]) # n_batch x n_in x n_out
-        input_delays = torch.zeros_like(input_weights)
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
+                                      [[3.,1.,0.], [1.,3.,1.]]]) # n_in x n_out
+        input_delays = torch.zeros_like(input_weights[0])
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         neuron_params = {
             "threshold": 1.0,
             "train_delay": False,
@@ -109,7 +103,7 @@ class TestSpiketimeLinear(unittest.TestCase):
         device = "cpu"
         output_spikes = torch.tensor([[11./40., 13./40., 1.1], [1./3., 5./8., 3./2.]]) # n_batch x n_out (now only the actual spike times)
         
-        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, thresholds, neuron_params, device, output_spikes)
+        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, neuron_params, device, output_spikes, input_delays)
         dw_solution = torch.tensor([
             [[-output_spikes[0,0]/4., -output_spikes[0,1]/4., -output_spikes[0,2]/1.], 
              [(0.1-output_spikes[0,0])/4., (0.1-output_spikes[0,1])/4., (0.1-output_spikes[0,2])/1.]],
@@ -136,8 +130,8 @@ class TestSpiketimeLinear(unittest.TestCase):
         """
         input_spikes = torch.tensor([[0., 0.1],[0., 0.5]]) # note: they are ordered in the wrapping function, and the weights sorted accordingly
         input_weights = torch.tensor([[[3.,1.,0.], [1.,3.,1.]],[[3.,1.,0.], [1.,3.,1.]]]) # n_batch x n_in x n_out
-        input_delays = torch.zeros_like(input_weights)
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
+        input_delays = torch.zeros_like(input_weights[0])
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         neuron_params = {
             "threshold": 1.0,
             "train_delay": True,
@@ -147,7 +141,7 @@ class TestSpiketimeLinear(unittest.TestCase):
         device = "cpu"
         output_spikes = torch.tensor([[11./40., 13./40., 1.1], [1./3., 5./8., 3./2.]]) # n_batch x n_out (now only the actual spike times)
 
-        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, thresholds, neuron_params, device, output_spikes)
+        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, neuron_params, device, output_spikes, input_delays)
         dw_solution = torch.tensor([
             [[-output_spikes[0,0]/4., -output_spikes[0,1]/4., -output_spikes[0,2]/1.], 
              [(0.1-output_spikes[0,0])/4., (0.1-output_spikes[0,1])/4., (0.1-output_spikes[0,2])/1.]],
@@ -174,9 +168,8 @@ class TestSpiketimeLinear(unittest.TestCase):
         """
         input_spikes = torch.tensor([[0., 0.1],[0., 0.5]]) # note: they are ordered in the wrapping function, and the weights sorted accordingly
         input_weights = torch.tensor([[[3.,1.,0.], [1.,3.,1.]],[[3.,1.,0.], [1.,3.,1.]]]) # n_batch x n_in x n_out
-        input_delays = torch.tensor([[[0.1,0.05,0.3], [.01,.2,0.5]],
-                                     [[0.1,0.05,0.3], [.01,.2,0.5]]]) # n_batch x n_in x n_out
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
+        input_delays = torch.tensor([[0.1,0.05,0.3], [.01,.2,0.5]]) # n_in x n_out
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         neuron_params = {
             "threshold": 1.0,
             "train_delay": True,
@@ -189,7 +182,7 @@ class TestSpiketimeLinear(unittest.TestCase):
             [(1+3*(0+0.1))/3., (1+1*(0+0.05)+3*(0.5+0.2))/4., (1+0*(0+0.3)+1*(0.5+0.5))/1.]
         ]) # n_batch x n_out
 
-        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, thresholds, neuron_params, device, output_spikes)
+        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, neuron_params, device, output_spikes, input_delays)
         dw_solution = torch.tensor([
             [[(0.1-output_spikes[0,0])/4., (0.05-output_spikes[0,1])/4., (0.3-output_spikes[0,2])/1.], 
              [(0.1+0.01-output_spikes[0,0])/4., (0.1+0.2-output_spikes[0,1])/4., (0.1+0.5-output_spikes[0,2])/1.]],
@@ -215,13 +208,12 @@ class TestSpiketimeLinear(unittest.TestCase):
         """
         input_spikes = torch.tensor([[0., 0.1],[0., 0.5]]) # note: they are ordered in the wrapping function, and the weights sorted accordingly
         input_weights = torch.tensor([[[3.,1.,0.], [1.,3.,1.]],[[3.,1.,0.], [1.,3.,1.]]]) # n_batch x n_in x n_out
-        input_delays = torch.tensor([[[0.1,0.05,0.3], [.01,.2,0.5]],
-                                     [[0.1,0.05,0.3], [.01,.2,0.5]]]) # n_batch x n_in x n_out
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays
+        input_delays = torch.tensor([[0.1,0.05,0.3], [.01,.2,0.5]]) # n_in x n_out
+        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         neuron_params = {
             "threshold": 1.0,
             "train_delay": True,
-            "train_threshold": False
+            "train_threshold": True
         } 
         thresholds = torch.tensor([1,2,3])
         device = "cpu"
@@ -230,7 +222,7 @@ class TestSpiketimeLinear(unittest.TestCase):
             [(1+3*(0+0.1))/3., (2+1*(0+0.05)+3*(0.5+0.2))/4., (3+0*(0+0.3)+1*(0.5+0.5))/1.]
         ]) # n_batch x n_out
 
-        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, thresholds, neuron_params, device, output_spikes)
+        dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, neuron_params, device, output_spikes, input_delays)
         dw_solution = torch.tensor([
             [[(0.1-output_spikes[0,0])/4., (0.05-output_spikes[0,1])/4., (0.3-output_spikes[0,2])/1.], 
              [(0.1+0.01-output_spikes[0,0])/4., (0.1+0.2-output_spikes[0,1])/4., (0.1+0.5-output_spikes[0,2])/1.]],
@@ -244,12 +236,60 @@ class TestSpiketimeLinear(unittest.TestCase):
         ]) # n_batch x n_in x n_out
         # formula: dt_v/dt_u = w_uv / sum of causal weights
         dd_solution = dt_solution.clone()
-        dtheta_solution = torch.zeros_like(dt)
+        dtheta_solution = torch.tensor([
+            [[1./4., 1./4., 1./1.],[1./4., 1./4., 1./1.]],
+            [[1./3., 1./4., 1./1.],[0, 1./4., 1./1.]] # would only be set to 0 if there is no outgoing spike from this neuron (never the case here)
+        ]) # n_batch x n_in x n_out
         assert_close(dw, dw_solution)
         assert_close(dt, dt_solution)
         assert_close(dd, dd_solution)
         assert_close(dtheta, dtheta_solution)
 
+    def test_spiketime_derivative_with_substituted_delay_threshold(self):
+            """
+            Test that the derivatives of the output spike times remain correct when delays between neurons are introduced, represented by their log to enforce positivity,
+            and the thresholds are modified.
+            """
+            input_spikes = torch.tensor([[0., 0.1],[0., 0.5]]) # note: they are ordered in the wrapping function, and the weights sorted accordingly
+            input_weights = torch.tensor([[[3.,1.,0.], [1.,3.,1.]],[[3.,1.,0.], [1.,3.,1.]]]) # n_batch x n_in x n_out
+            input_delays = torch.log(torch.tensor([[0.1,0.05,0.3], [.01,.2,0.5]])) # n_in x n_out
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + torch.exp(input_delays.unsqueeze(0))
+            neuron_params = {
+                "threshold": 1.0,
+                "train_delay": True,
+                "train_threshold": True,
+                "substitute_delay": True
+            } 
+            thresholds = torch.tensor([1,2,3])
+            device = "cpu"
+            output_spikes = torch.tensor([
+                [(1+3*(0+0.1)+1*(0.1+0.01))/4., (2+1*(0+0.05)+3*(0.1+0.2))/4., (3+0*(0+0.3)+1*(0.1+0.5))/1.],
+                [(1+3*(0+0.1))/3., (2+1*(0+0.05)+3*(0.5+0.2))/4., (3+0*(0+0.3)+1*(0.5+0.5))/1.]
+            ]) # n_batch x n_out
+
+            dw, dt, dd, dtheta = get_spiketime_derivative(delayed_input_spikes, input_weights, neuron_params, device, output_spikes, input_delays)
+            dw_solution = torch.tensor([
+                [[(0.1-output_spikes[0,0])/4., (0.05-output_spikes[0,1])/4., (0.3-output_spikes[0,2])/1.], 
+                [(0.1+0.01-output_spikes[0,0])/4., (0.1+0.2-output_spikes[0,1])/4., (0.1+0.5-output_spikes[0,2])/1.]],
+                [[(0.1-output_spikes[1,0])/3., (0.05-output_spikes[1,1])/4., (0.3-output_spikes[1,2])/1.], 
+                [0./3., (0.5+0.2-output_spikes[1,1])/4., (0.5+0.5-output_spikes[1,2])/1.]]
+            ]) # n_batch x n_in x n_out
+            # formula: dt_v / dw_uv = -(t_v-t_u) / sum of causal weights
+            dt_solution = torch.tensor([
+                [[3./4., 1./4., 0./1.],[1./4., 3./4., 1./1.]],
+                [[3./3., 1./4., 0./1.],[0, 3./4., 1./1.]] # 0 if spike arrived too late to affect output spike
+            ]) # n_batch x n_in x n_out
+            # formula: dt_v/dt_u = w_uv / sum of causal weights
+            dd_solution = dt_solution.clone() * (torch.exp(input_delays).unsqueeze(0))
+            dtheta_solution = torch.tensor([
+                [[1./4., 1./4., 1./1.],[1./4., 1./4., 1./1.]],
+                [[1./3., 1./4., 1./1.],[0, 1./4., 1./1.]] # would only be set to 0 if there is no outgoing spike from this neuron (never the case here)
+            ]) # n_batch x n_in x n_out
+        
+            assert_close(dw, dw_solution)
+            assert_close(dt, dt_solution)
+            assert_close(dd, dd_solution)
+            assert_close(dtheta, dtheta_solution)
 
 if __name__ == '__main__':
     unittest.main()

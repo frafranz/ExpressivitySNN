@@ -88,6 +88,29 @@ class TestEqualtimeLayer(unittest.TestCase):
         ])
         assert_close(output_spikes,output_spikes_solution)
 
+    def test_forward_with_substituted_delays_thresholds(self):
+        """
+        Test the forward propagation through one layer of the SNN, including substituted delays and thresholds.
+        No bias input, i.e. an additional fixed-time input spike, is used here.
+        """
+        input_features = 2
+        output_features = 3
+        sim_params = {'use_forward_integrator': False,'threshold': 1.0, 'activation': 'linear', 'substitute_delay': True}
+        weights_init = torch.tensor([[1.,3.,1.], [3.,1.,0.]]) # n_in x n_out
+        delays_init = torch.log(torch.tensor([[.01,.2,0.5],[0.1,0.05,0.3]])) # n_in x n_out
+        threshold_init = torch.tensor([.5, 1., 2.]) # n_out
+        device = "cpu"
+        bias = 0 # number of bias inputs
+        layer = EqualtimeLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
+        input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
+        device = "cpu"
+        output_spikes = layer(input_spikes)
+        output_spikes_solution = torch.tensor([
+            [(.5+3*(0+0.1)+1*(0.1+0.01))/4., (1+1*(0+0.05)+3*(0.1+0.2))/4., (2+0*(0+0.3)+1*(0.1+0.5))/1.],
+            [(.5+3*(0+0.1))/3., (1+1*(0+0.05)+3*(0.5+0.2))/4., (2+0*(0+0.3)+1*(0.5+0.5))/1.]
+        ])
+        assert_close(output_spikes,output_spikes_solution)
+
     def test_backward(self):
         # TODO
         pass

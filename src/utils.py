@@ -35,7 +35,10 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
 
         # create causal set
         # due to to different delays, the sorting has to be done for every output separately
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
+        if neuron_params.get('substitute_delay'): # substitute delays by their logarithms to enforce positivity
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + torch.exp(input_delays.unsqueeze(0))
+        else:
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
         sort_indices = delayed_input_spikes.argsort(1)
         sorted_spikes = delayed_input_spikes.gather(1, sort_indices)
         sorted_weights = torch.gather(input_weights.unsqueeze(0).expand(n_batch,-1,-1), dim=1, index=sort_indices) # output is of shape n_batch x n_pre x n_post
@@ -50,8 +53,12 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         if neuron_params['activation']=='linear':
             import utils_spiketime_linear as utils_spiketime # use our linear activation model
         elif neuron_params['activation']=='alpha_equaltime':
+            if neuron_params['train_delay'] or neuron_params['train_threshold']:
+                raise NotImplementedError(f"training of delay and threshold not implemented for {neuron_params['activation']}")
             import utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
         elif neuron_params['activation']=='alpha_doubletime':
+            if neuron_params['train_delay'] or neuron_params['train_threshold']:
+                raise NotImplementedError(f"training of delay and threshold not implemented for {neuron_params['activation']}")
             import utils_spiketime_dt as utils_spiketime # use the modified alpha activation as in Goeltz et al
         else:
             raise NotImplementedError(f"optimizer {neuron_params['activation']} not implemented")
@@ -106,7 +113,11 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         # recover saved values
         input_spikes, input_weights, input_delays, thresholds, output_spikes = ctx.saved_tensors
         # might be left out, since already done before saving tensors, but like this we also know the indices (need to revert later)
-        delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
+        if ctx.sim_params.get('substitute_delay'): # substitute delays by their logarithms to enforce positivity
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + torch.exp(input_delays.unsqueeze(0))
+        else:
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
+        
         sort_indices = delayed_input_spikes.argsort(1)
         sorted_spikes = delayed_input_spikes.gather(1, sort_indices)
         n_batch = input_spikes.shape[0]
@@ -127,20 +138,20 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
             raise NotImplementedError(f"optimizer {ctx.sim_params['activation']} not implemented")
 
         dw_ordered, dt_ordered, dd_ordered, dtheta = utils_spiketime.get_spiketime_derivative(
-            sorted_spikes, sorted_weights, thresholds, ctx.sim_params, ctx.device, output_spikes)
+            sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes, input_delays)
 
         # retransform it in the correct way
         dw = to_device(torch.zeros(dw_ordered.size()), ctx.device)
         dt = to_device(torch.zeros(dt_ordered.size()), ctx.device)
         dd = to_device(torch.zeros(dd_ordered.size()), ctx.device)
-        dtheta = to_device(torch.zeros(dtheta.size()), ctx.device)
+        dtheta = to_device(dtheta, ctx.device)
         # masking: determine how to revert sorting of spike times (this depends on the output neuron since the delays are different!)
         mask_from_spikeordering = torch.argsort(sort_indices, dim=1)
 
         dw = torch.gather(dw_ordered, 1, mask_from_spikeordering)
         dt = torch.gather(dt_ordered, 1, mask_from_spikeordering)
         dd = torch.gather(dd_ordered, 1, mask_from_spikeordering)
-        # no ordering needed for dtheta since it does not refer input spike order
+        # no ordering needed for dtheta since it does not refer to input spike order
 
         error_to_work_with = propagated_error.view(
             propagated_error.shape[0], 1, propagated_error.shape[1]) # reshape propagated error to n_batch x 1 x n_post
@@ -333,7 +344,10 @@ class EqualtimeLayer(torch.nn.Module):
             self.weights.data = weights_init
         
         if isinstance(delays_init, tuple):
-            self.delays.data.normal_(delays_init[0], delays_init[1])
+            if self.sim_params.get('substitute_delay'):
+                self.delays.data.normal_(delays_init[0], delays_init[1])
+            else:
+                self.delays.data.normal_(delays_init[0], delays_init[1])
         else:
             assert delays_init.shape == (input_features + bias, output_features)
             self.delays.data = delays_init
@@ -386,6 +400,7 @@ class LossFunction(torch.nn.Module):
     def forward(self, label_times, true_label):
         label_idx = to_device(true_label.clone().type(torch.long).view(-1, 1), self.device)
         true_label_times = label_times.gather(1, label_idx).flatten()
+        # cross entropy between true label distribution and softmax-scaled label spike times
         loss = torch.log(torch.exp(-1 * label_times / (self.xi * self.tau_syn)).sum(1)) \
             + true_label_times / (self.xi * self.tau_syn)
         regulariser = self.alpha * torch.exp(true_label_times / (self.beta * self.tau_syn))
@@ -417,9 +432,7 @@ class LossFunctionMSE(torch.nn.Module):
         return
 
     def forward(self, label_times, true_label):
-        label_idx = to_device(true_label.clone().type(torch.long).view(-1, 1), self.device)
-        true_label_times = label_times.gather(1, label_idx).flatten()
-
+        # get a vector which is 1 at the true label and set to t_correct at the true label and to t_wrong at the others
         target = to_device(torch.eye(self.number_labels), self.device)[true_label.int()] * (self.t_correct - self.t_wrong) + self.t_wrong
         loss = 1. / 2. * (label_times - target)**2
         loss[label_times == np.inf] = 100.

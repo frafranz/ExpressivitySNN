@@ -252,7 +252,7 @@ def save_config(dirname, filename, neuron_params, network_layout, training_param
     return
 
 
-def save_data(dirname, filename, net, label_weights, train_losses, train_accuracies, val_losses, val_accuracies,
+def save_data(dirname, filename, net, all_parameters, train_losses, train_accuracies, val_losses, val_accuracies,
               val_labels, mean_val_outputs_sorted, std_val_outputs_sorted, epoch_dir=(False, -1)):
     if (dirname is None) or (filename is None):
         return
@@ -270,7 +270,8 @@ def save_data(dirname, filename, net, label_weights, train_losses, train_accurac
     torch.save(net, dirname + filename + '_network.pt')
 
     # save training result
-    np.save(dirname + filename + '_label_weights_training.npy', label_weights)
+    for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"]:
+        np.save(dirname + filename + '_{}_training.npy'.format(key), all_parameters[key])
     np.save(dirname + filename + '_train_losses.npy', train_losses)
     np.save(dirname + filename + '_train_accuracies.npy', train_accuracies)
     np.save(dirname + filename + '_val_losses.npy', val_losses)
@@ -406,7 +407,7 @@ def apply_noise(input_times, noise_params, device):
 
 
 def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, trainloader, valloader,
-               num_classes, all_weights, all_train_loss, all_validate_loss, std_validate_outputs_sorted,
+               num_classes, all_parameters, all_train_loss, all_validate_loss, std_validate_outputs_sorted,
                mean_validate_outputs_sorted, tmp_training_progress, all_validate_accuracy,
                all_train_accuracy, weight_bumping_steps, training_params):
     bump_val = training_params['weight_bumping_value']
@@ -487,7 +488,14 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                 std_validate_outputs_sorted[i].append(std_times)
 
             all_validate_accuracy.append(validate_accuracy)
-            all_weights.append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
+            all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
+            all_parameters["hidden_weights"].append(net.layers[-2].weights.data.cpu().detach().numpy().copy())
+            if training_params["train_delay"]:
+                all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
+                all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
+            if training_params["train_threshold"]:
+                all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
+                all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
             all_validate_loss.append(validate_loss.data.cpu().detach().numpy())
 
         if (epoch % print_step) == 0:
@@ -498,7 +506,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                       validate_loss, train_accuracy),
                   flush=True)
 
-        result_dict = {'all_weights': all_weights,
+        result_dict = {'all_parameters': all_parameters,
                        'all_train_loss': all_train_loss,
                        'all_validate_loss': all_validate_loss,
                        'std_validate_outputs_sorted': std_validate_outputs_sorted,
@@ -507,8 +515,6 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                        'all_validate_accuracy': all_validate_accuracy,
                        'all_train_accuracy': all_train_accuracy,
                        'weight_bumping_steps': weight_bumping_steps,
-                       # 'all_hidden_weights': all_hidden_weights,
-                       # 'all_label_weights': all_label_weights,
                        }
     return net, criterion, optimizer, scheduler, result_dict
 
@@ -542,7 +548,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay', 'train_threshold']
+                            'clip_weights_max', 'train_delay', 'train_threshold', 'substitute_delay']
                   }
     sim_params.update(neuron_params)
 
@@ -590,7 +596,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
 
     # evaluate on validation set before training
     num_classes = network_layout['layer_sizes'][-1]
-    all_weights = []
+    all_parameters = {"label_weights": [], "hidden_weights": [], "label_delays": [], "hidden_delays": [], "label_thresholds": [], "hidden_thresholds": []}
     all_train_loss = []
     all_validate_loss = []
     std_validate_outputs_sorted = [[] for i in range(num_classes)]
@@ -620,7 +626,14 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         print('Initial validation accuracy: {:.3f}'.format(validate_accuracy))
         print('Initial validation loss: {:.3f}'.format(loss))
         all_validate_accuracy.append(validate_accuracy)
-        all_weights.append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
+        all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
+        all_parameters["hidden_weights"].append(net.layers[-2].weights.data.cpu().detach().numpy().copy())
+        if training_params["train_delay"]:
+            all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
+            all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
+        if training_params["train_threshold"]:
+            all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
+            all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
         all_validate_loss.append(loss.data.cpu().detach().numpy())
 
     print("training started")
@@ -633,7 +646,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         net, criterion, optimizer, scheduler, result_dict = run_epochs(
             e_start, e_end, net, criterion,
             optimizer, scheduler, device, loader_train,
-            loader_val, num_classes, all_weights,
+            loader_val, num_classes, all_parameters,
             all_train_loss, all_validate_loss,
             std_validate_outputs_sorted,
             mean_validate_outputs_sorted,
@@ -641,7 +654,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
             all_train_accuracy, weight_bumping_steps,
             training_params)
         print('Ending training from epoch {0} to epoch {1}'.format(e_start, e_end))
-        all_weights = result_dict['all_weights']
+        all_parameters = result_dict['all_parameters']
         all_train_loss = result_dict['all_train_loss']
         all_validate_loss = result_dict['all_validate_loss']
         std_validate_outputs_sorted = result_dict['std_validate_outputs_sorted']
@@ -652,7 +665,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         tmp_training_progress = result_dict['tmp_training_progress']
         # all_hidden_weights = result_dict['all_hidden_weights']
         # all_label_weights = result_dict['all_label_weights']
-        save_data(foldername, filename, net, all_weights, all_train_loss,
+        save_data(foldername, filename, net, all_parameters, all_train_loss,
                   all_train_accuracy, all_validate_loss, all_validate_accuracy,
                   validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted,
                   epoch_dir=(True, e_end))
@@ -682,7 +695,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     print('####################')
     print('Test accuracy: {}'.format(test_accuracy))
 
-    save_data(foldername, filename, net, all_weights, all_train_loss,
+    save_data(foldername, filename, net, all_parameters, all_train_loss,
               all_train_accuracy, all_validate_loss, all_validate_accuracy,
               validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted)
 
@@ -707,7 +720,10 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     all_train_accuracy = list(load_data(dirname_long, filename, '_train_accuracies.npy'))
     all_validate_loss = list(load_data(dirname_long, filename, '_val_losses.npy'))
     all_validate_accuracy = list(load_data(dirname_long, filename, '_val_accuracies.npy'))
-    all_weights = list(load_data(dirname_long, filename, '_label_weights_training.npy'))
+    all_parameters = {
+        key: list(load_data(dirname_long, filename, '_{}_training.npy'.format(key))) \
+            for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"] 
+    }
     mean_validate_outputs_sorted = list(load_data(dirname_long, filename, '_mean_val_outputs_sorted.npy'))
     mean_validate_outputs_sorted = [list(item) for item in mean_validate_outputs_sorted]
     std_validate_outputs_sorted = list(load_data(dirname_long, filename, '_std_val_outputs_sorted.npy'))
@@ -732,7 +748,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay', 'train_threshold']
+                            'clip_weights_max', 'train_delay', 'train_threshold', 'substitute_delay']
                   }
     sim_params.update(neuron_params)
 
@@ -790,7 +806,14 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         print('Initial validation accuracy: {:.3f}'.format(validate_accuracy))
         print('Initial validation loss: {:.3f}'.format(loss))
         all_validate_accuracy.append(validate_accuracy)
-        all_weights.append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
+        all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
+        all_parameters["hidden_weights"].append(net.layers[-2].weights.data.cpu().detach().numpy().copy())
+        if training_params["train_delay"]:
+            all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
+            all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
+        if training_params["train_threshold"]:
+            all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
+            all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
         all_validate_loss.append(loss.data.cpu().detach().numpy())
 
     # only seed after initial validation run
@@ -812,7 +835,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         net, criterion, optimizer, scheduler, result_dict = run_epochs(
             e_start, e_end, net, criterion,
             optimizer, scheduler, device, loader_train,
-            loader_val, num_classes, all_weights,
+            loader_val, num_classes, all_parameters,
             all_train_loss, all_validate_loss,
             std_validate_outputs_sorted,
             mean_validate_outputs_sorted,
@@ -820,7 +843,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
             all_train_accuracy, weight_bumping_steps,
             training_params)
         print('Ending training from epoch {0} to epoch {1}'.format(e_start, e_end))
-        all_weights = result_dict['all_weights']
+        all_parameters = result_dict['all_parameters']
         all_train_loss = result_dict['all_train_loss']
         all_validate_loss = result_dict['all_validate_loss']
         std_validate_outputs_sorted = result_dict['std_validate_outputs_sorted']
@@ -829,7 +852,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         all_train_accuracy = result_dict['all_train_accuracy']
         weight_bumping_steps = result_dict['weight_bumping_steps']
         tmp_training_progress = result_dict['tmp_training_progress']
-        save_data(dirname, filename, net, all_weights, all_train_loss,
+        save_data(dirname, filename, net, all_parameters, all_train_loss,
                   all_train_accuracy, all_validate_loss, all_validate_accuracy,
                   validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted,
                   epoch_dir=(True, e_end))
@@ -856,7 +879,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     print('####################')
     print('Test accuracy: {}'.format(test_accuracy))
 
-    save_data(dirname, filename, net, all_weights, all_train_loss,
+    save_data(dirname, filename, net, all_parameters, all_train_loss,
               all_train_accuracy, all_validate_loss, all_validate_accuracy,
               validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted)
 

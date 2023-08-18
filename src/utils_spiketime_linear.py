@@ -56,18 +56,21 @@ def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device
     return ret_val
 
 
-def get_spiketime_derivative(input_spikes, input_weights, thresholds, neuron_params, device,
-                             output_spikes):
+def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
+                             output_spikes, input_delays):
     """Calculating the derivatives, see above.
 
-    Weights and (delayed) input spikes have shape batch,presyn,postsyn, are ordered according to spike times
+    Weights and (delayed) input spikes have shape batch,presyn,postsyn, are ordered according to spike times.
+
+    Output spikes
     """
     n_batch, n_presyn, n_postsyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn2 = input_weights.shape
     n_batch3, n_postsyn3 = output_spikes.shape
+    n_presyn3, n_postsyn4 = input_delays.shape
     assert n_batch == n_batch2 == n_batch3, "Deep problem with unequal batch sizes"
-    assert n_presyn == n_presyn2
-    assert n_postsyn == n_postsyn2 == n_postsyn3
+    assert n_presyn == n_presyn2 == n_presyn3
+    assert n_postsyn == n_postsyn2 == n_postsyn3 == n_postsyn4
 
     output_minus_input = -input_spikes + output_spikes.view(n_batch, 1, n_postsyn)
     mask = (output_minus_input < 0) | torch.isinf(output_minus_input) | torch.isnan(output_minus_input) # verify causality: output after input, or output never occurs
@@ -82,12 +85,15 @@ def get_spiketime_derivative(input_spikes, input_weights, thresholds, neuron_par
     summed_weights = torch.clamp(torch.sum(causal_weights, 1, keepdim=True),min=eps) # here we sum only over contributing (causal) weights (negative summed weights would never cause a spike)
     dw = -output_minus_input / summed_weights # for weight gradient, need shape n_batch x n_pre x n_post (since t_v only depends on w_uv)
     dt = causal_weights / summed_weights
-    if "train_delay" in neuron_params and neuron_params["train_delay"]:
-        dd = causal_weights / summed_weights
+    if neuron_params.get("train_delay"):
+        if neuron_params.get("substitute_delay"):
+            dd = causal_weights*torch.exp(input_delays.unsqueeze(0)) / summed_weights # substitute d_uv = exp(kappa_uv) to enforce that the delay is positive
+        else:
+            dd = causal_weights / summed_weights
     else:
         dd = torch.zeros_like(dt)
-    if "train_threshold" in neuron_params and neuron_params["train_threshold"]:
-        dtheta = 1. / summed_weights.expand(-1,n_presyn,-1)
+    if neuron_params.get("train_threshold"):
+        dtheta = 1. / summed_weights.repeat(1,n_presyn,1)
     else:
         dtheta = torch.zeros_like(dt)
 

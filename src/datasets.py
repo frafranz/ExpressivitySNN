@@ -219,7 +219,6 @@ class YinYangDataset(Dataset):
         self.class_names = tmp_dataset.class_names
         loader = torch.utils.data.DataLoader(tmp_dataset, batch_size=1, shuffle=False)
 
-        tmp_for_save = []
         for i, elem in enumerate(loader):
             self.cs.append(elem[1][0].data.item())
 
