@@ -7,12 +7,15 @@ neuron_params:
   threshold: 1.0
 network_layout:
   bias_times: [0.9]
-  #delay_means : [0.1, 0.1]
+  # delay_means : [0.1, 0.1]
   delay_means: [-2.3, -2.3]
-  #delay_stdevs: [0.01, 0.01]
-  delay_stdevs: [0.5, 0.5]
+  # delay_means: [0.0, 0.0]
+  # delay_stdevs: [0.01, 0.01]
+  # delay_stdevs: [0.5, 0.5]
+  delay_stdevs: [0.0, 0.0]
   threshold_means : [1, 1]
   threshold_stdevs: [0.1, 0.1]
+  # threshold_stdevs: [0., 0.]
   layer_sizes: [120, 3]
   n_biases: [1, 1]
   n_inputs: 4
@@ -42,7 +45,7 @@ training_params:
   sim_time: 4.0
   substitute_delay: true
   torch_seed: 2000
-  train_delay: true
+  train_delay: false
   train_threshold: true
   training_noise: false
   use_forward_integrator: false

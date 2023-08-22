@@ -101,6 +101,6 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     dw[mask] = 0.
     dt[mask] = 0.
     dd[mask] = 0.
-    dtheta[mask] = 0.
+    dtheta[output_spikes.unsqueeze(1).repeat(1, n_presyn, 1)>0] = 0. # for threshold only require that output neuron spikes, independent from input neurons
     
     return dw, dt, dd, dtheta
