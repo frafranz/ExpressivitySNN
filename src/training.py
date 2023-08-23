@@ -29,19 +29,15 @@ class Net(torch.nn.Module):
         self.weight_means = network_layout['weight_means']
         self.weight_stdevs = network_layout['weight_stdevs']
         
-        if sim_params["train_delay"]:
-            self.delay_means = network_layout['delay_means']
-            self.delay_stdevs = network_layout['delay_stdevs']
+        if network_layout.get('substitute_delays'):
+            self.delay_means = network_layout.get('delay_means', [-10.]*self.n_layers)
         else:
-            self.delay_means = [0]*self.n_layers
-            self.delay_stdevs = [0]*self.n_layers
+            self.delay_means = network_layout.get('delay_means', [0.]*self.n_layers)
+        self.delay_stdevs = network_layout.get('delay_stdevs', [0.]*self.n_layers)
 
-        if sim_params["train_threshold"]:
-            self.threshold_means = network_layout['threshold_means']
-            self.threshold_stdevs = network_layout['threshold_stdevs']
-        else:
-            self.threshold_means = [sim_params['threshold']]*self.n_layers
-            self.threshold_stdevs = [0]*self.n_layers
+        self.threshold_means = network_layout.get('threshold_means', [sim_params['threshold']]*self.n_layers)
+        self.threshold_stdevs = network_layout.get('threshold_stdevs', [0.]*self.n_layers)
+
         self.device = device
 
         if 'bias_times' in network_layout.keys():

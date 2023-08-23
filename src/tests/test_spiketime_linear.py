@@ -238,7 +238,7 @@ class TestSpiketimeLinear(unittest.TestCase):
         dd_solution = dt_solution.clone()
         dtheta_solution = torch.tensor([
             [[1./4., 1./4., 1./1.],[1./4., 1./4., 1./1.]],
-            [[1./3., 1./4., 1./1.],[0, 1./4., 1./1.]] # would only be set to 0 if there is no outgoing spike from this neuron (never the case here)
+            [[1./3., 1./4., 1./1.],[1./3., 1./4., 1./1.]] # would only be set to 0 if there is no outgoing spike from this neuron (never the case here)
         ]) # n_batch x n_in x n_out
         assert_close(dw, dw_solution)
         assert_close(dt, dt_solution)
@@ -283,7 +283,7 @@ class TestSpiketimeLinear(unittest.TestCase):
             dd_solution = dt_solution.clone() * (torch.exp(input_delays).unsqueeze(0))
             dtheta_solution = torch.tensor([
                 [[1./4., 1./4., 1./1.],[1./4., 1./4., 1./1.]],
-                [[1./3., 1./4., 1./1.],[0, 1./4., 1./1.]] # would only be set to 0 if there is no outgoing spike from this neuron (never the case here)
+                [[1./3., 1./4., 1./1.],[1./3., 1./4., 1./1.]] # would only be set to 0 if there is no outgoing spike from this neuron (never the case here)
             ]) # n_batch x n_in x n_out
         
             assert_close(dw, dw_solution)
