@@ -27,8 +27,6 @@ class TestExperiment(unittest.TestCase):
             "n_layers": 2,
             "weight_means": [1.5, 0.5],
             "weight_stdevs": [0.8, 0.8],
-            "delay_means": [0, 0],
-            "delay_stdevs": [0, 0],
             "threshold_means": [1, 1],
             "threshold_stdevs": [0, 0],
         }
@@ -51,7 +49,6 @@ class TestExperiment(unittest.TestCase):
             "resolution": 0.01,
             "sim_time": 4.0,
             "torch_seed": 2000,
-            "train_delay": False,
             "train_threshold": False,
             "training_noise": {"mean": 0.0, "std_dev": 0.2},
             "use_forward_integrator": False,

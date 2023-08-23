@@ -7,13 +7,6 @@ neuron_params:
   threshold: 1.0
 network_layout:
   bias_times: [0.9]
-  # delay_means : [0.1, 0.1]
-  delay_means: [-2.3, -2.3]
-  # delay_means: [-10., -10.]
-  # delay_means: [0.0, 0.0]
-  # delay_stdevs: [0.01, 0.01]
-  delay_stdevs: [0.5, 0.5]
-  # delay_stdevs: [0.0, 0.0]
   threshold_means : [1, 1]
   # threshold_stdevs: [0.1, 0.1]
   threshold_stdevs: [0., 0.]
@@ -33,8 +26,8 @@ training_params:
   learning_rate: 0.005
   loss:
     type: MSE
-    t_correct: 1.0
-    t_wrong: 1.7
+    t_correct: 1.7
+    t_wrong: 1.0
     # type: TTFS
     # alpha: 0.0
     # beta: 1
@@ -48,9 +41,7 @@ training_params:
   print_step_percent: 5.0
   resolution: 0.01
   sim_time: 4.0
-  substitute_delay: true
   torch_seed: 2000
-  train_delay: true
   train_threshold: false
   training_noise: false
   use_forward_integrator: false

@@ -28,13 +28,6 @@ class Net(torch.nn.Module):
         self.n_biases = network_layout['n_biases']
         self.weight_means = network_layout['weight_means']
         self.weight_stdevs = network_layout['weight_stdevs']
-        
-        if network_layout.get('substitute_delays'):
-            self.delay_means = network_layout.get('delay_means', [-10.]*self.n_layers)
-        else:
-            self.delay_means = network_layout.get('delay_means', [0.]*self.n_layers)
-        self.delay_stdevs = network_layout.get('delay_stdevs', [0.]*self.n_layers)
-
         self.threshold_means = network_layout.get('threshold_means', [sim_params['threshold']]*self.n_layers)
         self.threshold_stdevs = network_layout.get('threshold_stdevs', [0.]*self.n_layers)
 
@@ -55,14 +48,12 @@ class Net(torch.nn.Module):
         self.layers = torch.nn.ModuleList()
         layer = utils.EqualtimeLayer(self.n_inputs, self.layer_sizes[0],
                                      sim_params, (self.weight_means[0], self.weight_stdevs[0]),
-                                     (self.delay_means[0], self.delay_stdevs[0]),
                                      (self.threshold_means[0], self.threshold_stdevs[0]),
                                      device, self.n_biases[0])
         self.layers.append(layer)
         for i in range(self.n_layers - 1):
             layer = utils.EqualtimeLayer(self.layer_sizes[i], self.layer_sizes[i + 1],
                                          sim_params, (self.weight_means[i + 1], self.weight_stdevs[i + 1]),
-                                         (self.delay_means[i+1], self.delay_stdevs[i+1]),
                                          (self.threshold_means[i+1], self.threshold_stdevs[i+1]),
                                          device, self.n_biases[i + 1])
             self.layers.append(layer)
@@ -266,7 +257,7 @@ def save_data(dirname, filename, net, all_parameters, train_losses, train_accura
     torch.save(net, dirname + filename + '_network.pt')
 
     # save training result
-    for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"]:
+    for key in ["label_weights", "hidden_weights", "label_thresholds", "hidden_thresholds"]:
         np.save(dirname + filename + '_{}_training.npy'.format(key), all_parameters[key])
     np.save(dirname + filename + '_train_losses.npy', train_losses)
     np.save(dirname + filename + '_train_accuracies.npy', train_accuracies)
@@ -486,9 +477,6 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             all_validate_accuracy.append(validate_accuracy)
             all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
             all_parameters["hidden_weights"].append(net.layers[-2].weights.data.cpu().detach().numpy().copy())
-            if training_params["train_delay"]:
-                all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
-                all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
             if training_params["train_threshold"]:
                 all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
                 all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
@@ -544,7 +532,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay', 'train_threshold', 'substitute_delay']
+                            'clip_weights_max', 'train_threshold']
                   }
     sim_params.update(neuron_params)
 
@@ -592,7 +580,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
 
     # evaluate on validation set before training
     num_classes = network_layout['layer_sizes'][-1]
-    all_parameters = {"label_weights": [], "hidden_weights": [], "label_delays": [], "hidden_delays": [], "label_thresholds": [], "hidden_thresholds": []}
+    all_parameters = {"label_weights": [], "hidden_weights": [], "label_thresholds": [], "hidden_thresholds": []}
     all_train_loss = []
     all_validate_loss = []
     std_validate_outputs_sorted = [[] for i in range(num_classes)]
@@ -624,9 +612,6 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         all_validate_accuracy.append(validate_accuracy)
         all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
         all_parameters["hidden_weights"].append(net.layers[-2].weights.data.cpu().detach().numpy().copy())
-        if training_params["train_delay"]:
-            all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
-            all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
         if training_params["train_threshold"]:
             all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
             all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
@@ -718,7 +703,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     all_validate_accuracy = list(load_data(dirname_long, filename, '_val_accuracies.npy'))
     all_parameters = {
         key: list(load_data(dirname_long, filename, '_{}_training.npy'.format(key))) \
-            for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"] 
+            for key in ["label_weights", "hidden_weights", "label_thresholds", "hidden_thresholds"] 
     }
     mean_validate_outputs_sorted = list(load_data(dirname_long, filename, '_mean_val_outputs_sorted.npy'))
     mean_validate_outputs_sorted = [list(item) for item in mean_validate_outputs_sorted]
@@ -744,7 +729,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     sim_params = {k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
                             'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay', 'train_threshold', 'substitute_delay']
+                            'clip_weights_max', 'train_threshold']
                   }
     sim_params.update(neuron_params)
 
@@ -804,9 +789,6 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         all_validate_accuracy.append(validate_accuracy)
         all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
         all_parameters["hidden_weights"].append(net.layers[-2].weights.data.cpu().detach().numpy().copy())
-        if training_params["train_delay"]:
-            all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
-            all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
         if training_params["train_threshold"]:
             all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
             all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
