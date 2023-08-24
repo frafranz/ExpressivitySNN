@@ -4,6 +4,7 @@ neuron_params:
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0
+  tau_mem: 1.0
   threshold: 1.0
 network_layout:
   bias_times: [0.9]
