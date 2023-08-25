@@ -231,11 +231,11 @@ def save_config(dirname, filename, neuron_params, network_layout, training_param
     with open(osp.join(dirname, 'config.yaml'), 'w') as f:
         yaml.dump({"dataset": filename, "neuron_params": neuron_params,
                    "network_layout": network_layout, "training_params": training_params}, f)
-    with open(osp.join(dirname, filename + '_gitsha.txt'), 'w') as f:
-        try:
-            f.write(subprocess.check_output(["git", "rev-parse", "HEAD"]).decode())
-        except subprocess.CalledProcessError:
-            print("Not a git repository, can't save git sha")
+    # with open(osp.join(dirname, filename + '_gitsha.txt'), 'w') as f:
+    #     try:
+    #         f.write(subprocess.check_output(["git", "rev-parse", "HEAD"]).decode())
+    #     except subprocess.CalledProcessError:
+    #         print("Not a git repository, can't save git sha")
     return
 
 

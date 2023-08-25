@@ -395,7 +395,7 @@ class LossFunctionMSE(torch.nn.Module):
 
     def forward(self, label_times, true_label):
         # get a vector which is 1 at the true label and set to t_correct at the true label and to t_wrong at the others
-        target = to_device(torch.eye(self.number_labels), self.device)[true_label.int()] * (self.t_correct - self.t_wrong) + self.t_wrong
+        target = to_device(torch.eye(self.number_labels), self.device)[true_label.long()] * (self.t_correct - self.t_wrong) + self.t_wrong
         loss = 1. / 2. * (label_times - target)**2
         loss[label_times == np.inf] = 100.
         return loss.mean()
