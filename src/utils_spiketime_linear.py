@@ -25,33 +25,15 @@ def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device
     assert n_batch == n_batch2, "Deep problem with unequal batch sizes"
     assert n_presyn == n_presyn2
 
-    # split up weights for each causal set length (new dimensions: batches x n_pre x causal sets x n_post)
-    weights_split = input_weights[:, :, None, :]
-    weights_split = weights_split.repeat(1, 1, n_presyn, 1)
-    tmp_mask = torch.tril_indices(n_presyn, n_presyn, offset=-1)  # want diagonal thus offset once below diagonal
-    weights_split[:, tmp_mask[0], tmp_mask[1], :] = 0. # mask all indices strictly below the diagonal (these won't be needed)
-
-    # temporary reshape for torch reasons (view is like reshape, but ensuring that the data agree and are not copied)
-    # weights_split = weights_split.view(n_batch, n_presyn, n_presyn * n_postsyn) # TODO: can be left out now?
-
     # fastest implementation: multiply spike times by weights and finally sum over causal spike times
-    weighted_spikes_split = (input_spikes.unsqueeze(-1)*input_weights)[:, :, None, :]
-    weighted_spikes_split = weighted_spikes_split.repeat(1, 1, n_presyn, 1)
-    tmp_mask = torch.tril_indices(n_presyn, n_presyn, offset=-1)  # want diagonal thus offset once below diagonal
-    weighted_spikes_split[:, tmp_mask[0], tmp_mask[1], :] = 0. # mask all indices strictly below the diagonal (these won't be needed)
-    # temporary reshape for torch reasons (view is like reshape, but ensuring that the data agree and are not copied)
-    # weighted_spikes_split = weighted_spikes_split.view(n_batch, n_presyn, n_presyn * n_postsyn) # TODO: can be left out now?
-    
-    a = torch.sum(weighted_spikes_split, 1) # n_batch x n_pre x n_post
     # set positive lower bound to avoid NaN during division, since a negative (or 0) sum of weights means there is no output pulse
     eps = 1e-10
-    summed_weights = torch.clamp(torch.sum(weights_split, 1), min=eps) # here we sum over the cols of the tridiagonal matrix, i.e. first only one, second two etc.
-    # has shape n_batch x (n_pre x n_post)
+    summed_weights = torch.clamp(torch.cumsum(input_weights, dim=1), min=eps) # cumulative sum over input spikes
+    a = torch.cumsum(input_spikes.unsqueeze(-1)*input_weights, dim=1) # cumulative sum over weighted input spikes
 
-    ret_val = (thresholds.view(1, 1, n_postsyn)+a)/summed_weights
+    ret_val = (thresholds.view(1, 1, n_postsyn)+a)/summed_weights # shape: one possible spike time for each batch, last input and output
     ret_val[summed_weights==eps] = torch.inf # if the sum of weights is negative or 0, there won't be an output spike
-    ret_val = ret_val.view(n_batch, n_presyn, n_postsyn) # ensure correct shape (one possible spike time for each batch and synapse)
-
+    
     return ret_val
 
 
