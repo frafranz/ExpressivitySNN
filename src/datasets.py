@@ -94,39 +94,58 @@ class BarsDataset(Dataset):
 
 
 class FullMnist(Dataset):
-    def __init__(self, which='train', zero_at=0.15, one_at=2., invert=True):
+    def __init__(self, which='train', zero_at=0.15, one_at=2., invert=True, late_at_inf=False):
         self.cs = []
         self.vals = []
         self.class_names = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-        if which == 'train':
-            self.data = torchvision.datasets.MNIST('../data/mnist', train=True, download=True)
-            for i in range(0, 50000, 1):
-                self.cs.append(self.data.train_labels[i])
-                dat_flat = self.data.train_data[i].flatten().double()
-                dat_flat *= 1./256.
+        
+        if not np.all([osp.isfile(f"../data/mnist_{which}{i}.npy")
+                       for i in ['_label', '']]):
+            print("Need to download images...")
+            if which == 'train':
+                train = True
+                start_sample = 0
+                end_sample = 50000
+            elif which == 'val':
+                train = True
+                start_sample = 50000
+                end_sample = 60000
+            elif which == 'test':
+                train = False
+                start_sample = 0
+                end_sample = 10000
+            self.data = torchvision.datasets.MNIST('../data/mnist', train=train, download=True, transform=torchvision.transforms.ToTensor())
+            loader = torch.utils.data.DataLoader(self.data, batch_size=1, shuffle=False)
+            tmp_for_save = []
+            for i, elem in enumerate(loader):
+                if i >= start_sample and i < end_sample:
+                    label = elem[1][0].data.item()
+                    self.cs.append(label)
+                    dat_flat = elem[0][0][0].flatten().double()
+                    dat_flat *= 1./256.
+                    tmp_for_save.append(dat_flat)
+                    if invert:
+                        dat_flat = dat_flat * (-1.) + 1.  # make invert white and black
+                    dat_flat = zero_at + dat_flat * (one_at - zero_at)
+                    if late_at_inf:
+                        dat_flat[dat_flat == one_at] = np.inf # i.e. lowest values do not lead to any spikes
+                    self.vals.append(dat_flat)
+            tmp_for_save = np.array([ii.cpu().detach().numpy() for ii in tmp_for_save])
+            np.save(f"../data/mnist_{which}_label.npy",
+                    torch.tensor(self.cs).cpu().detach().numpy())
+            np.save(f"../data/mnist_{which}.npy",
+                    torch.tensor(tmp_for_save).cpu().detach().numpy())
+            print("Saved processed images")
+        else:
+            print("load preprocessed data")
+            self.cs = np.load(f"../data/mnist_{which}_label.npy")
+            tmp_data = np.load(f"../data/mnist_{which}.npy")
+            for i, dat_flat in enumerate(tmp_data):
                 if invert:
-                    dat_flat = dat_flat*(-1.) + 1.  # make invert white and black
+                    dat_flat = dat_flat * (-1.) + 1.  # make invert white and black (ensured that saved data are not inverted / late at inf)
                 dat_flat = zero_at + dat_flat * (one_at - zero_at)
-                self.vals.append(dat_flat)
-        elif which == 'val':
-            self.data = torchvision.datasets.MNIST('../data/mnist', train=True, download=True)
-            for i in range(50000, 60000, 1):
-                self.cs.append(self.data.train_labels[i])
-                dat_flat = self.data.train_data[i].flatten().double()
-                dat_flat *= 1./256.
-                if invert:
-                    dat_flat = dat_flat*(-1.) + 1.  # make invert white and black
-                dat_flat = zero_at + dat_flat * (one_at - zero_at)
-                self.vals.append(dat_flat)
-        elif which == 'test':
-            self.data = torchvision.datasets.MNIST('../data/mnist', train=False, download=True)
-            for i in range(10000):
-                self.cs.append(self.data.train_labels[i])
-                dat_flat = self.data.train_data[i].flatten().double()
-                dat_flat *= 1./256.
-                if invert:
-                    dat_flat = dat_flat*(-1.) + 1.  # make invert white and black
-                dat_flat = zero_at + dat_flat * (one_at - zero_at)
+                if late_at_inf:
+                    dat_flat[dat_flat == one_at] = np.inf
                 self.vals.append(dat_flat)
 
     def __getitem__(self, index):
@@ -170,6 +189,7 @@ class HicannMnist(Dataset):
                     label = elem[1][0].data.item()
                     self.cs.append(label)
                     dat_flat = elem[0][0][0].flatten().double()
+                    dat_flat *= 1./256.
                     tmp_for_save.append(dat_flat)
                     if invert:
                         dat_flat = dat_flat * (-1.) + 1.  # make invert white and black

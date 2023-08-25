@@ -6,7 +6,6 @@ __pycache__/
 *.swp
 
 # data folders
-data/
 experiment_results/
 experiment_pretrained/
 
