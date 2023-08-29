@@ -112,12 +112,13 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         """
         # recover saved values
         input_spikes, input_weights, input_delays, thresholds, output_spikes = ctx.saved_tensors
+        
         # might be left out, since already done before saving tensors, but like this we also know the indices (need to revert later)
         if ctx.sim_params.get('substitute_delay'): # substitute delays by their logarithms to enforce positivity
             delayed_input_spikes = input_spikes.unsqueeze(-1) + torch.exp(input_delays.unsqueeze(0))
         else:
             delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
-        
+
         sort_indices = delayed_input_spikes.argsort(1)
         sorted_spikes = delayed_input_spikes.gather(1, sort_indices)
         n_batch = input_spikes.shape[0]
@@ -138,7 +139,7 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
             raise NotImplementedError(f"optimizer {ctx.sim_params['activation']} not implemented")
 
         dw_ordered, dt_ordered, dd_ordered, dtheta = utils_spiketime.get_spiketime_derivative(
-            sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes, input_delays)
+                sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes, input_delays, thresholds)
 
         # retransform it in the correct way
         dw = to_device(torch.zeros(dw_ordered.size()), ctx.device)
@@ -198,22 +199,21 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
 
         if torch.any(torch.isinf(weight_gradient)) or \
            torch.any(torch.isinf(new_propagated_error)) or \
-           torch.any(torch.isinf(delay_gradient)) or \
-           torch.any(torch.isinf(threshold_gradient)) or \
            torch.any(torch.isnan(weight_gradient)) or \
            torch.any(torch.isnan(new_propagated_error)) or \
-           torch.any(torch.isnan(weight_gradient)) or \
+           torch.any(torch.isinf(delay_gradient)) or \
+           torch.any(torch.isinf(threshold_gradient)) or \
+           torch.any(torch.isnan(delay_gradient)) or \
            torch.any(torch.isnan(threshold_gradient)):
             print(f" wg nan {torch.isnan(weight_gradient).sum()}, inf {torch.isinf(weight_gradient).sum()}")
-            print(f" dg nan {torch.isnan(delay_gradient).sum()}, inf {torch.isinf(delay_gradient).sum()}")
-            print(f" tg nan {torch.isnan(threshold_gradient).sum()}, inf {torch.isinf(threshold_gradient).sum()}")
             print(f" new_propagated_error nan {torch.isnan(new_propagated_error).sum()}, "
                   f"inf {torch.isinf(new_propagated_error).sum()}")
+            print(f" dg nan {torch.isnan(delay_gradient).sum()}, inf {torch.isinf(delay_gradient).sum()}")
+            print(f" tg nan {torch.isnan(threshold_gradient).sum()}, inf {torch.isinf(threshold_gradient).sum()}")
             print('found nan or inf in propagated_error, weight_gradient, delay_gradient or threshold_gradient, something is wrong oO')
             sys.exit()
-
         return new_propagated_error, weight_gradient, delay_gradient, threshold_gradient, None, None
-
+        
 
 class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
     @staticmethod

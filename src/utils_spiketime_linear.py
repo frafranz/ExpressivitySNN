@@ -22,9 +22,10 @@ def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device
     """
     n_batch, n_presyn, n_postsyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn2 = input_weights.shape
+    n_postsyn3 = thresholds.shape[0]
     assert n_batch == n_batch2, "Deep problem with unequal batch sizes"
     assert n_presyn == n_presyn2
-    assert n_postsyn == n_postsyn2
+    assert n_postsyn == n_postsyn2 == n_postsyn3
 
     # fastest implementation: multiply spike times by weights and finally sum over causal spike times
     # set positive lower bound to avoid NaN during division, since a negative (or 0) sum of weights means there is no output pulse
@@ -39,7 +40,7 @@ def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device
 
 
 def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
-                             output_spikes, input_delays):
+                             output_spikes, input_delays, thresholds):
     """Calculating the derivatives, see above.
 
     Weights and (delayed) input spikes have shape batch,presyn,postsyn, are ordered according to spike times.
