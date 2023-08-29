@@ -1,6 +1,6 @@
 dataset: yin_yang
 neuron_params:
-  activation: linear
+  activation: alpha_equaltime
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0
@@ -9,12 +9,12 @@ neuron_params:
 network_layout:
   bias_times: [0.9]
   # delay_means : [0.1, 0.1]
-  delay_means: [-2.3, -2.3]
+  # delay_means: [-2.3, -2.3]
   # delay_means: [-10., -10.]
-  # delay_means: [0.0, 0.0]
+  delay_means: [0.0, 0.0]
   # delay_stdevs: [0.01, 0.01]
-  delay_stdevs: [0.5, 0.5]
-  # delay_stdevs: [0.0, 0.0]
+  # delay_stdevs: [0.5, 0.5]
+  delay_stdevs: [0.0, 0.0]
   threshold_means : [1, 1]
   # threshold_stdevs: [0.1, 0.1]
   threshold_stdevs: [0., 0.]
@@ -49,9 +49,9 @@ training_params:
   print_step_percent: 5.0
   resolution: 0.01
   sim_time: 4.0
-  substitute_delay: true
+  substitute_delay: false
   torch_seed: 2000
-  train_delay: true
+  train_delay: false
   train_threshold: false
   training_noise: false
   use_forward_integrator: false

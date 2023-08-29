@@ -44,64 +44,59 @@ else:
         raise
 
 
-def get_spiketime(input_spikes, input_weights, neuron_params, device):
+def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device):
     """Calculating spike times, all at once.
 
     Called from EqualtimeFunction below, for each layer.
     Dimensions are crucial:
-        input weights have dimension BATCHESxNxM with N pre and M postsynaptic neurons.
+        input weights and (delayed) input spikes have dimension BATCHESxNxM with N pre and M postsynaptic neurons, 
+        where the last coordinate represents the output neuron for which the input is considered
+        thresholds have dimension M, corresponding to all postsynaptic neurons
     The functions relies on the incoming spike time with their respective weights being sorted.
 
     The return value (n_batch, n_presyn, n_postsyn) contains the time of on outgoing spike to neuron n_postsyn (for n_batch),
     given that all input spikes up to the one at n_presyn have arrived.
     """
-    n_batch, n_presyn = input_spikes.shape
-    n_batch2, n_presyn2, n_postsyn = input_weights.shape
+    n_batch, n_presyn, n_postsyn = input_spikes.shape
+    n_batch2, n_presyn2, n_postsyn2 = input_weights.shape
+    n_postsyn3 = thresholds.shape[0]
     assert n_batch == n_batch2, "Deep problem with unequal batch sizes"
     assert n_presyn == n_presyn2
+    assert n_postsyn == n_postsyn2 == n_postsyn3
 
-    # split up weights for each causal set length (new dimensions: batches x n_pre x causal sets x n_post)
-    weights_split = input_weights[:, :, None, :]
-    weights_split = weights_split.repeat(1, 1, n_presyn, 1)
-    tmp_mask = torch.tril_indices(n_presyn, n_presyn, offset=-1)  # want diagonal thus offset (once below diagonal)
-    weights_split[:, tmp_mask[0], tmp_mask[1], :] = 0. # mask all indices strictly below the diagonal (these won't be needed)
-
-    # temporary reshape for torch reasons (view is like reshape, but ensuring that the data agree and are not copied)
-    weights_split = weights_split.view(n_batch, n_presyn, n_presyn * n_postsyn)
-    # new (empty) dimension needed for torch reasons
-    input_spikes = input_spikes.view(n_batch, 1, n_presyn)
-
+    # fastest implementation: multiply spike times by weights and finally sum over causal spike times
     tau_syn = neuron_params['tau_syn']
     exponentiated_spike_times_syn = torch.exp(input_spikes / tau_syn)
+    factor_a1 = torch.cumsum(exponentiated_spike_times_syn * input_weights, dim=1) # n_batch x n_presyn x postsyn
 
     # to prevent NaNs when first (sorted) weight(s) is 0, thus A and B, and ratio NaN add epsilon
     eps = 1e-6
-    factor_a1 = torch.matmul(exponentiated_spike_times_syn, weights_split) # n_batch x 1 x n_pre times n_batch x n_pre x (n_pre n_post)
-    # the result has dimensions n_batch x 1 x (n_pre n_post) (same for next row, later returned to n_batch x n_pre x n_post)
-    factor_b = torch.matmul(input_spikes * exponentiated_spike_times_syn, weights_split) / tau_syn + eps
-    factor_c = (neuron_params['threshold'] - neuron_params['leak']) * neuron_params['g_leak']
+    factor_b = torch.cumsum(input_spikes * exponentiated_spike_times_syn * input_weights, dim=1) / tau_syn + eps
+    factor_c = (thresholds.view(1, 1, n_postsyn) - neuron_params['leak']) * neuron_params['g_leak']
     zForLambertW = -factor_c / factor_a1 * torch.exp(factor_b / factor_a1)
 
     factor_W = lambertw(zForLambertW, device)
 
     ret_val = tau_syn * (factor_b / factor_a1 - factor_W)
-    ret_val = ret_val.view(n_batch, n_presyn, n_postsyn)
 
     return ret_val
 
 
 def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
-                             output_spikes):
+                             output_spikes, input_delays, thresholds):
     """Calculating the derivatives, see above.
 
-    Weights have shape batch,presyn,postsyn, are ordered according to spike times
+    Weights and (delayed) spike times have shape batch,presyn,postsyn, are ordered according to spike times.
     """
-    n_batch, n_presyn = input_spikes.shape
-    n_batch2, n_presyn2, n_postsyn = input_weights.shape
-    assert n_batch == n_batch2, "Deep problem with unequal batch sizes"
-    assert n_presyn == n_presyn2
+    n_batch, n_presyn, n_postsyn = input_spikes.shape
+    n_batch2, n_presyn2, n_postsyn2 = input_weights.shape
+    n_batch3, n_postsyn3 = output_spikes.shape
+    n_presyn3, n_postsyn4 = input_delays.shape
+    assert n_batch == n_batch2 == n_batch3, "Deep problem with unequal batch sizes"
+    assert n_presyn == n_presyn2 == n_presyn3
+    assert n_postsyn == n_postsyn2 == n_postsyn3 == n_postsyn4
 
-    output_minus_input = -input_spikes.view(n_batch, n_presyn, 1) + output_spikes.view(n_batch, 1, n_postsyn) # n_batch x n_pre x n_post
+    output_minus_input = -input_spikes + output_spikes.view(n_batch, 1, n_postsyn)
     mask = (output_minus_input < 0) | torch.isinf(output_minus_input) | torch.isnan(output_minus_input)
     causal_weights = input_weights
     # set infinities to 0 preventing nans
@@ -109,28 +104,26 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     input_spikes[torch.isinf(input_spikes)] = 0.
     output_spikes[torch.isinf(output_spikes)] = 0.
 
-    input_spikes = input_spikes.view(n_batch, 1, n_presyn)
-
     tau_syn = neuron_params['tau_syn']
-    exponentiated_spike_times_syn = torch.exp(input_spikes / tau_syn) # n_batch x 1 x n_pre
+    exponentiated_spike_times_syn = torch.exp(input_spikes / tau_syn)
 
     eps = 1e-6
-    factor_a1 = torch.matmul(exponentiated_spike_times_syn, causal_weights) # n_batch x 1 x n_pre times n_batch x n_pre x n_post = n_batch x 1 x n_post
-    factor_b = torch.matmul(input_spikes * exponentiated_spike_times_syn, causal_weights) / tau_syn + eps # dito
-    factor_c = (neuron_params['threshold'] - neuron_params['leak']) * neuron_params['g_leak']
+    factor_a1 = torch.sum(exponentiated_spike_times_syn * causal_weights, dim=1, keepdim=True) # n_batch x n_pre x n_post
+    factor_b = torch.sum(input_spikes * exponentiated_spike_times_syn * causal_weights, dim=1, keepdim=True) / tau_syn + eps # dito
+    factor_c = (thresholds.view(1, 1, n_postsyn) - neuron_params['leak']) * neuron_params['g_leak']
     zForLambertW = -factor_c / factor_a1 * torch.exp(factor_b / factor_a1) # dito
 
     factor_W = lambertw(zForLambertW, device) # dito
 
-    exponentiated_spike_times_syn = exponentiated_spike_times_syn.squeeze().unsqueeze(-1) # n_batch x n_pre x 1
-
-    dw = -1. / factor_a1 / (1. + factor_W) * exponentiated_spike_times_syn * output_minus_input # n_batch x 1 x n_post times n_batch x n_pre x 1 = n_batch x n_pre x n_post
+    dw = -1. / factor_a1 / (1. + factor_W) * exponentiated_spike_times_syn * output_minus_input # n_batch x n_pre x n_post
     # weight gradient not larger since output time t_v is only influenced by weights w_uv
     dt = -1. / factor_a1 / (1. + factor_W) * causal_weights * exponentiated_spike_times_syn * \
-        (output_minus_input - tau_syn) / tau_syn # n_batch x 1 x n_post times n_batch x n_pre x n_post = n_batch x n_pre x n_post
+        (output_minus_input - tau_syn) / tau_syn # n_batch x n_pre x n_post
 
     # manually set the uncausal and inf output spike entries 0
     dw[mask] = 0.
     dt[mask] = 0.
+    dtheta = torch.zeros_like(dt)
+    dd = torch.zeros_like(dt)
     
-    return dw, dt #dtheta,dd
+    return dw, dt, dtheta, dd
