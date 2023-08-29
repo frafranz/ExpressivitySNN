@@ -127,7 +127,7 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
             raise NotImplementedError(f"optimizer {ctx.sim_params['activation']} not implemented")
 
         dw_ordered, dt_ordered, dtheta = utils_spiketime.get_spiketime_derivative(
-            sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes)
+            sorted_spikes, sorted_weights, ctx.sim_params, ctx.device, output_spikes, thresholds)
 
         # retransform it in the correct way
         dw = to_device(torch.zeros(dw_ordered.size()), ctx.device)

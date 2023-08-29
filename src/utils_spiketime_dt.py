@@ -15,28 +15,21 @@ import torch.autograd
 import yaml
 
 
-def get_spiketime(input_spikes, input_weights, neuron_params, device):
+def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device):
     """Calculating spike times, all at once.
 
     Called from EqualtimeFunction below, for each layer.
     Dimensions are crucial:
+        input spikes have dimension batchesxN with N presynaptic neurons
         input weights have dimension BATCHESxNxM with N pre and M postsynaptic neurons.
+        thresholds have dimension M, corresponding to all postsynaptic neurons
     """
     n_batch, n_presyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn = input_weights.shape
+    n_postsyn2 = thresholds.shape[0]
     assert n_batch == n_batch2, "Deep problem with unequal batch sizes"
     assert n_presyn == n_presyn2
-
-    # split up weights for each causal set length
-    weights_split = input_weights[:, :, None, :]
-    weights_split = weights_split.repeat(1, 1, n_presyn, 1)
-    tmp_mask = torch.tril_indices(n_presyn, n_presyn, offset=-1)  # want diagonal thus offset
-    weights_split[:, tmp_mask[0], tmp_mask[1], :] = 0.
-
-    # temporary reshape for torch reasons
-    weights_split = weights_split.view(n_batch, n_presyn, n_presyn * n_postsyn)
-    # new (empty) dimension needed for torch reasons
-    input_spikes = input_spikes.view(n_batch, 1, n_presyn)
+    assert n_postsyn == n_postsyn2
 
     tau_syn = neuron_params['tau_syn']
     tau_mem = neuron_params['tau_mem']
@@ -49,30 +42,31 @@ def get_spiketime(input_spikes, input_weights, neuron_params, device):
 
     # to prevent NaNs when first (sorted) weight(s) is 0, thus A and B, and ratio NaN add epsilon
     eps = 1e-6
-    factor_a1 = torch.matmul(exponentiated_spike_times_syn, weights_split) + eps
-    factor_a2 = torch.matmul(exponentiated_spike_times_mem, weights_split)
-    factor_c = (neuron_params['threshold'] - neuron_params['leak']) * neuron_params['g_leak']
+    factor_a1 = torch.cumsum(exponentiated_spike_times_syn.unsqueeze(-1) * input_weights, dim=1) + eps
+    factor_a2 = torch.cumsum(exponentiated_spike_times_mem.unsqueeze(-1) * input_weights, dim=1) + eps
+    factor_c = (thresholds.view(1, 1, n_postsyn) - neuron_params['leak']) * neuron_params['g_leak']
 
     factor_sqrt = torch.sqrt(factor_a2 ** 2 - 4 * factor_a1 * factor_c)
 
     ret_val = 2. * tau_syn * torch.log(2. * factor_a1 / (factor_a2 + factor_sqrt))
     ret_val[torch.isnan(ret_val)] = float('inf')
     
-    ret_val = ret_val.view(n_batch, n_presyn, n_postsyn)
-
     return ret_val
 
 
 def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
-                             output_spikes):
+                             output_spikes, thresholds):
     """Calculating the derivatives, see above.
 
-    Weights have shape batch,presyn,postsyn, are ordered according to spike times
+    Input spikes have shape batch,presyn, weights have shape batch,presyn,postsyn, and both are ordered according to input spike times.
+
     """
     n_batch, n_presyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn = input_weights.shape
+    n_postsyn2 = thresholds.shape[0]
     assert n_batch == n_batch2, "Deep problem with unequal batch sizes"
     assert n_presyn == n_presyn2
+    assert n_postsyn == n_postsyn2
 
     output_minus_input = -input_spikes.view(n_batch, n_presyn, 1) + output_spikes.view(n_batch, 1, n_postsyn)
     mask = (output_minus_input < 0) | torch.isinf(output_minus_input) | torch.isnan(output_minus_input)
@@ -93,7 +87,7 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     eps = 1e-6
     factor_a1 = torch.matmul(exponentiated_spike_times_syn, causal_weights) + eps
     factor_a2 = torch.matmul(exponentiated_spike_times_mem, causal_weights) + eps
-    factor_c = (neuron_params['threshold'] - neuron_params['leak']) * neuron_params['g_leak']
+    factor_c = (thresholds.view(1, 1, n_postsyn) - neuron_params['leak']) * neuron_params['g_leak']
 
     factor_sqrt = torch.sqrt(factor_a2 ** 2 - 4 * factor_a1 * factor_c)
 
@@ -111,5 +105,6 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     # manually set the uncausal and inf output spike entries 0
     dw[mask] = 0.
     dt[mask] = 0.
+    dtheta = torch.zeros_like(dt)
 
-    return dw, dt
+    return dw, dt, dtheta

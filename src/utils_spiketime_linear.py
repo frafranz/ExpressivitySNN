@@ -38,7 +38,7 @@ def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device
 
 
 def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
-                             output_spikes):
+                             output_spikes, thresholds):
     """Calculating the derivatives, see above.
 
     Input spikes have shape batch,presyn, weights have shape batch,presyn,postsyn, and both are ordered according to input spike times.
