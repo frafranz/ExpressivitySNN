@@ -70,7 +70,7 @@ class TestSpiketimeLinear(unittest.TestCase):
         device = "cpu"
         output_spikes = torch.tensor([[11./40., 13./40., 1.1], [1./3., 5./8., 3./2.]]) # n_batch x n_out (now only the actual spike times)
         
-        dw, dt, dtheta = get_spiketime_derivative(input_spikes, input_weights, neuron_params, device, output_spikes)
+        dw, dt, dtheta = get_spiketime_derivative(input_spikes, input_weights, neuron_params, device, output_spikes, thresholds)
         dw_solution = torch.tensor([
             [[-output_spikes[0,0]/4., -output_spikes[0,1]/4., -output_spikes[0,2]/1.], 
              [(0.1-output_spikes[0,0])/4., (0.1-output_spikes[0,1])/4., (0.1-output_spikes[0,2])/1.]],
@@ -105,7 +105,7 @@ class TestSpiketimeLinear(unittest.TestCase):
             [(1+3*(0+0.1))/3., (2+1*(0+0.05)+3*(0.5+0.2))/4., (3+0*(0+0.3)+1*(0.5+0.5))/1.]
         ]) # n_batch x n_out
 
-        dw, dt, dtheta = get_spiketime_derivative(input_spikes, input_weights, neuron_params, device, output_spikes)
+        dw, dt, dtheta = get_spiketime_derivative(input_spikes, input_weights, neuron_params, device, output_spikes, thresholds)
         dw_solution = torch.tensor([
             [[(-output_spikes[0,0])/4., (-output_spikes[0,1])/4., (-output_spikes[0,2])/1.], 
              [(0.1-output_spikes[0,0])/4., (0.1-output_spikes[0,1])/4., (0.1-output_spikes[0,2])/1.]],

@@ -48,9 +48,10 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     n_batch, n_presyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn = input_weights.shape
     n_batch3, n_postsyn2 = output_spikes.shape
+    n_postsyn3 = thresholds.shape[0]
     assert n_batch == n_batch2 == n_batch3, "Deep problem with unequal batch sizes"
     assert n_presyn == n_presyn2
-    assert n_postsyn == n_postsyn2
+    assert n_postsyn == n_postsyn2 == n_postsyn3
 
     output_minus_input = -input_spikes.unsqueeze(-1) + output_spikes.view(n_batch, 1, n_postsyn)
     mask = (output_minus_input < 0) | torch.isinf(output_minus_input) | torch.isnan(output_minus_input) # verify causality: output after input, or output never occurs
