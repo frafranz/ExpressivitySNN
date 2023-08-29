@@ -54,7 +54,7 @@ training_params:
   train_delay: false
   train_threshold: false
   training_noise: false
-  use_forward_integrator: false
+  use_forward_integrator: true
   weight_bumping_exp: true
   weight_bumping_targeted: true
   weight_bumping_value: 0.0005

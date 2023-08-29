@@ -21,7 +21,7 @@ input_binsize = 0.01  # doubles as initial resolution
 sim_time = 3.
 debug = False
 
-resols = input_binsize / 2**np.arange(0, 7)
+resols = input_binsize / 2**np.arange(0, 6)
 
 seed = np.random.randint(0, 100000)
 

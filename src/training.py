@@ -428,7 +428,11 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             # zero the parameter gradients
             optimizer.zero_grad()
             # forward pass
+            import time 
+            start = time.time()
             label_times, hidden_times = net(input_times)
+            stop = time.time()
+            print("eval of net: ", (stop-start)*1000)
             selected_classes = criterion.select_classes(label_times)
             # Either do the backward pass or bump weights because spikes are missing
             last_weights_bumped, bump_val = check_bump_weights(net, hidden_times, label_times,
@@ -495,7 +499,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             all_validate_loss.append(validate_loss.data.cpu().detach().numpy())
 
         if (epoch % print_step) == 0:
-            print("... {0}% done, train accuracy: {4:.3f}, validation accuracy: {1:.3f},"
+            print("... {0}% done, train accuracy: {4:.3f}, validation accuracy: {1:.3f}, "
                   "trainings loss: {2:.5f}, validation loss: {3:.5f}".format(
                       epoch * 100 / training_params['epoch_number'], validate_accuracy,
                       np.mean(train_loss) if len(train_loss) > 0 else np.NaN,

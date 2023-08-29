@@ -4,11 +4,12 @@ neuron_params:
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0
+  tau_mem: 1.0
   threshold: 1.0
 network_layout:
   bias_times: [0.9]
-  delay_means : [0.1, 0.1]
-  delay_stdevs: [0.01, 0.01]
+  delay_means : [-2.3, -2.3]
+  delay_stdevs: [0.5, 0.5]
   threshold_means : [1, 1]
   threshold_stdevs: [0.0, 0.0]
   layer_sizes: [10, 2]
@@ -27,6 +28,14 @@ training_params:
   epoch_number: 300
   epoch_snapshots: [100, 200]
   learning_rate: 0.005
+  loss:
+    type: MSE
+    t_correct: 1.7
+    t_wrong: 1.0
+    # type: TTFS
+    # alpha: 0.005
+    # beta: 1
+    # xi: 0.2
   lr_scheduler: {gamma: 0.95, step_size: 20, type: StepLR}
   max_dw_norm: 0.2
   max_num_missing_spikes: [0.3, 0.0]
@@ -36,11 +45,12 @@ training_params:
   print_step_percent: 5.0
   resolution: 0.01
   sim_time: 4.0
+  substitute_delay: true
   train_delay: true
   train_threshold: false
   torch_seed: 2000
   training_noise: {mean: 0.0, std_dev: 0.2}
-  use_forward_integrator: false
+  use_forward_integrator: true
   weight_bumping_exp: true
   weight_bumping_targeted: true
   weight_bumping_value: 0.0005

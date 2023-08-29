@@ -64,10 +64,10 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
             raise NotImplementedError(f"optimizer {neuron_params['activation']} not implemented")
 
         tmp_output = utils_spiketime.get_spiketime(
-            sorted_spikes_masked,
-            sorted_weights,
-            thresholds,
-            neuron_params, device)
+                sorted_spikes_masked,
+                sorted_weights,
+                thresholds,
+                neuron_params, device)
 
         # compare new spike times with previous, to set all cases in which no spike would occur to inf
         before_last_input = tmp_output < sorted_spikes # output cannot happen before the last required input (means we need less inputs)
@@ -131,9 +131,9 @@ class EqualtimeFunctionEventbased(torch.autograd.Function):
         
         if ctx.sim_params['activation']=='linear':
             import utils_spiketime_linear as utils_spiketime # use our linear activation model
-        elif ctx.sim_params['activation']=='alpha_equaltime':
+        elif ctx.sim_params['activation'] == 'alpha_equaltime':
             import utils_spiketime_et as utils_spiketime # use the alpha activation as in Goeltz et al
-        elif ctx.sim_params['activation']=='alpha_doubletime':
+        elif ctx.sim_params['activation'] == 'alpha_doubletime':
             import utils_spiketime_dt as utils_spiketime # use the modified alpha activation as in Goeltz et al
         else:
             raise NotImplementedError(f"optimizer {ctx.sim_params['activation']} not implemented")
@@ -221,40 +221,78 @@ class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
                 input_spikes, input_weights, input_delays, thresholds,
                 sim_params, device, output_times=None):
         """use a simple euler integration, then compare with a threshold to determine spikes"""
-        batch_size, input_features = input_spikes.shape
-        _, output_features = input_weights.shape
+        n_batch, n_presyn = input_spikes.shape
+        n_presyn2, n_postsyn = input_weights.shape
+        n_presyn3, n_postsyn2 = input_delays.shape
+        n_postsyn3 = thresholds.shape[0]
+        assert n_presyn == n_presyn2 == n_presyn3
+        assert n_postsyn == n_postsyn2 == n_postsyn3
 
-        # TODO: ignoring delays and thresholds so far
-        input_transf = torch.zeros(tuple(input_spikes.shape) + (sim_params['steps'], ),
-                                   device=device, requires_grad=False)
-        input_times_step = (input_spikes / sim_params['resolution']).long()
-        input_times_step[input_times_step > sim_params['steps'] - 1] = sim_params['steps'] - 1
-        input_times_step[torch.isinf(input_spikes)] = sim_params['steps'] - 1
+        if sim_params['activation'] in ['alpha_equaltime', 'alpha_doubletime'] and (sim_params['train_delay'] or sim_params['train_threshold']):
+            raise NotImplementedError(f"training of delay and threshold not implemented for {sim_params['activation']}")
+
+        import time
+        
+        # start = time.time()
+        
+        if sim_params.get('substitute_delay'): # substitute delays by their logarithms to enforce positivity
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + torch.exp(input_delays.unsqueeze(0))
+        else:
+            delayed_input_spikes = input_spikes.unsqueeze(-1) + input_delays.unsqueeze(0)
+
+        # stop = time.time()
+        # print("first: ", (stop-start)*1000) # 1ms
+        # start = time.time()
+                
+        input_transf = torch.zeros(tuple(delayed_input_spikes.shape) + (sim_params['steps'], ),
+                                   device=device, requires_grad=False) # shape: n_batch x n_input x n_output x steps
+        input_times_step = (delayed_input_spikes / sim_params['resolution']).long() # express input spike times as multiples of time steps (here 10ms), shape n_batch x n_input x n_output
+        input_times_step[input_times_step > sim_params['steps'] - 1] = sim_params['steps'] - 1 # upper bound on time step values due to finite sim time
+        input_times_step[torch.isinf(input_spikes)] = sim_params['steps'] - 1 # might already be covered by previous step
+        
+        # stop = time.time()
+        # print("second: ", (stop-start)*1000) # 97ms
+        # start = time.time()
 
         # one-hot code input times for easier multiplication
         input_transf = torch.eye(sim_params['steps'], device=device)[
-            input_times_step].reshape((batch_size, input_features, sim_params['steps']))
+            input_times_step].reshape((n_batch, n_presyn, n_postsyn, sim_params['steps'])) # identity matrix with row for each time step, evaluated for each input spike
+            # this yields for every input spike (and corresponding output) a one-hot code for the corresponding time step
 
-        charge = torch.einsum("abc,bd->adc", (input_transf, input_weights))
+        # stop = time.time()
+        # print("input_transf : ", (stop-start)*1000) # 80ms
+        # start = time.time()
+                
+        charge = torch.einsum("abcd,bc->acd", (input_transf, input_weights)) # i.e. multiply each input spike with its weight and sum, represented still as one-hot    
+        # this allows accessing the incoming current (for batch x output) by evaluating only the step number
 
-        # init is no synaptic current and mem at leak
-        syn = torch.zeros((batch_size, output_features), device=device)
-        mem = torch.ones((batch_size, output_features), device=device) * sim_params['leak']
+        # stop = time.time()
+        # print("charge : ", (stop-start)*1000) # 60ms
+        # start = time.time()
 
-        plotting = False
+        syn = torch.zeros((n_batch, n_postsyn), device=device) # initialize current (for each batch and output) as 0
+        mem = torch.ones((n_batch, n_postsyn), device=device) * sim_params['leak'] # initialize potential (for batch and output) at its rest value (0)
+        
+        plotting = False # TODO: can only be set here? put into config?
         all_mem = []
-        # want to save spikes
-        output_spikes = torch.ones((batch_size, output_features), device=device) * float('inf')
-        for step in range(sim_params['steps']):
-            # print(step)
-            mem = sim_params['decay_mem'] * (mem - sim_params['leak']) \
-                + 1. / sim_params['g_leak'] * syn * sim_params['resolution'] + sim_params['leak']
-            syn = sim_params['decay_syn'] * syn + charge[:, :, step]
-
-            # mask is a logical_and implemented by multiplication
+        output_spikes = torch.ones((n_batch, n_postsyn), device=device) * float('inf') # initialize output spikes as inf
+        for step in range(sim_params['steps']): # TODO: vectorize this stepwise computation? probably hard due to threshold etc., but could use triangular matrices
+            # TODO: actually linear activation might allow to compute this easily and vectorized, syn ist just charge summed over all steps, mem can be computed with a tridiagonal matrix?
+            if sim_params['activation']=='alpha_equaltime':
+                mem = sim_params['decay_mem'] * (mem - sim_params['leak']) \
+                    + 1. / sim_params['g_leak'] * syn * sim_params['resolution'] + sim_params['leak']
+                syn = sim_params['decay_syn'] * syn + charge[:, :, step]
+            elif sim_params['activation']=='linear':
+                mem += syn * sim_params['resolution'] # update potential by adding the incoming current times the stepsize
+                syn += charge[:, :, step] # given a batch and output neuron, the current increases by the corresponding input spikes times weights at this step
+                # TODO: where to add delta in here? would get some interplay 
+            else:
+                raise NotImplementedError(f"optimizer {sim_params['activation']} not implemented")
+                     
+            # mask is a logical_and implemented by multiplication: only update the first time the potential crosses the threshold
             output_spikes[
                 (torch.isinf(output_spikes) *
-                 mem > sim_params['threshold'])] = step * sim_params['resolution']
+                mem > thresholds.unsqueeze(0))] = step * sim_params['resolution']
             # reset voltage after spike for plotting
             # mem[torch.logical_not(torch.isinf(output_spikes))] = 0.
             if plotting:
@@ -263,7 +301,7 @@ class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
         if plotting:
             import matplotlib.pyplot as plt
             import warnings
-            if batch_size >= 9:
+            if n_batch >= 9:
                 fig, axes = plt.subplots(3, 3, figsize=(16, 10))
             else:
                 fig, ax = plt.subplots(1, 1)
@@ -295,14 +333,21 @@ class EqualtimeFunctionIntegrator(EqualtimeFunctionEventbased):
             fig.savefig('debug_int.png')
             plt.close(fig)
 
+        # stop = time.time()
+        # print("steps: ", (stop-start)*1000) # 122ms
+        # start = time.time()
+
         if torch.isnan(output_spikes).sum() > 0:
             raise ArithmeticError("There are NaNs in the output times, this means a serious error occured")
 
         ctx.sim_params = sim_params
         ctx.device = device
         ctx.save_for_backward(
-            input_spikes, input_weights, output_spikes)
+            input_spikes, input_weights, input_delays, thresholds, output_spikes)
 
+        # stop = time.time()
+        # print("fifth: ", (stop-start)*1000) # <1ms
+            
         return output_spikes
 
 
