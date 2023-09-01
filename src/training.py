@@ -412,6 +412,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
     noisy_training = training_params.get('training_noise') not in (False, None)
     print_step = max(1, int(training_params['epoch_number'] * training_params['print_step_percent'] / 100.))
 
+    eval_times = []
     for epoch in range(e_start, e_end, 1):
         train_loss = []
         num_correct = 0
@@ -432,7 +433,10 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             start = time.time()
             label_times, hidden_times = net(input_times)
             stop = time.time()
-            print("eval of net: ", (stop-start)*1000)
+            #print(f'eval of net: {(stop-start)*1000:.1f}')
+            eval_times.append((stop-start)*1000)
+            #print(f'mean eval time: {sum(eval_times)/len(eval_times):.2f}ms')
+            #print(f'n eval times: {len(eval_times):4}')
             selected_classes = criterion.select_classes(label_times)
             # Either do the backward pass or bump weights because spikes are missing
             last_weights_bumped, bump_val = check_bump_weights(net, hidden_times, label_times,
@@ -495,7 +499,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                 all_parameters["hidden_delays"].append(net.layers[-2].delays.data.cpu().detach().numpy().copy())
             if training_params["train_threshold"]:
                 all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
-                all_parameters["hidden_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
+                all_parameters["hidden_thresholds"].append(net.layers[-2].thresholds.data.cpu().detach().numpy().copy())
             all_validate_loss.append(validate_loss.data.cpu().detach().numpy())
 
         if (epoch % print_step) == 0:
