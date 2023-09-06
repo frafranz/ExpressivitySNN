@@ -1,21 +1,22 @@
 dataset: yin_yang
 neuron_params:
-  activation: alpha_equaltime
+  activation: linear
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0
   tau_mem: 1.0
   threshold: 1.0
+  delta: 1.0
 network_layout:
   bias_times: [0.9]
   # delay_means : [0.1, 0.1]
-  # delay_means: [-2.3, -2.3]
+  delay_means: [-2.3, -2.3]
   # delay_means: [-10., -10.]
-  delay_means: [0.0, 0.0]
+  # delay_means: [0.0, 0.0]
   # delay_stdevs: [0.01, 0.01]
-  # delay_stdevs: [0.5, 0.5]
-  delay_stdevs: [0.0, 0.0]
-  threshold_means : [1, 1]
+  delay_stdevs: [0.5, 0.5]
+  # delay_stdevs: [0.0, 0.0]
+  threshold_means : [1., 1.]
   # threshold_stdevs: [0.1, 0.1]
   threshold_stdevs: [0., 0.]
   layer_sizes: [120, 3]
@@ -29,8 +30,8 @@ training_params:
   batch_size_eval: 200
   enforce_cpu: True
   enforce_mps: False
-  epoch_number: 300
-  epoch_snapshots: [100, 200]
+  epoch_number: 150
+  epoch_snapshots: [10, 50, 100]
   learning_rate: 0.005
   loss:
     type: MSE
@@ -49,9 +50,9 @@ training_params:
   print_step_percent: 5.0
   resolution: 0.01
   sim_time: 4.0
-  substitute_delay: false
+  substitute_delay: true
   torch_seed: 2000
-  train_delay: false
+  train_delay: true
   train_threshold: false
   training_noise: false
   use_forward_integrator: false
