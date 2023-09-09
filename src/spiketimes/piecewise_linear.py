@@ -10,11 +10,15 @@ torch.set_default_dtype(torch.float64)
 def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device):
     """Calculating spike times, all at once.
 
-    Called from EqualtimeFunction below, for each layer.
-    Dimensions are crucial:
-        input weights have dimension BATCHESxNxM with N pre and M postsynaptic neurons.
-        (delayed) input spikes also have dimension batchesxNxM, where the last coordinate represents the output neuron for which the input is considered
-        thresholds have dimension M, corresponding to all postsynaptic neurons
+    Called from the explicit spiketime simulation, for each layer.
+
+
+    Parameters:
+        (delayed) input spikes: have dimension batchesxNxM, where the last coordinate represents the output neuron for which the input is considered
+        input weights: have dimension BATCHESxNxM with N pre and M postsynaptic neurons.
+        thresholds: have dimension M, corresponding to all postsynaptic neurons
+        neuron_params: parameters of the spiking neuron, not used
+        device: device to operate on, not used
     The functions relies on the incoming spike time with their respective weights being sorted, delays between neurons are already accounted for.
 
     The return value (n_batch, n_presyn, n_postsyn) contains the time of on outgoing spike to neuron n_postsyn (for n_batch),
@@ -43,9 +47,9 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
                              output_spikes, input_delays, thresholds):
     """Calculating the derivatives, see above.
 
-    Weights and (delayed) input spikes have shape batch,presyn,postsyn, are ordered according to spike times.
-
-    Output spikes
+    Parameters:
+        (delayed) input spikes, input weights: have shape batch,presyn,postsyn, are ordered according to spike times.
+        output spikes: have shape batch,postsyn
     """
     n_batch, n_presyn, n_postsyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn2 = input_weights.shape

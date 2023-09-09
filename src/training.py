@@ -1,5 +1,3 @@
-import matplotlib as mpl
-# mpl.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -7,7 +5,8 @@ import os.path as osp
 import torch
 import yaml
 
-import utils
+import utils, losses
+from net import Net
 
 torch.set_default_dtype(torch.float64)
 
@@ -15,116 +14,6 @@ torch.set_default_dtype(torch.float64)
 def running_mean(x, N=30):
     cumsum = np.cumsum(np.insert(x, 0, 0))
     return (cumsum[N:] - cumsum[:-N]) / float(N) # we subtract two parts of the array with a relative shift of N, output has shape of x - N
-
-
-class Net(torch.nn.Module):
-    def __init__(self, network_layout, sim_params, device):
-        super(Net, self).__init__()
-        self.n_inputs = network_layout['n_inputs']
-        self.n_layers = network_layout['n_layers']
-        self.layer_sizes = network_layout['layer_sizes']
-        self.n_biases = network_layout['n_biases']
-        self.weight_means = network_layout['weight_means']
-        self.weight_stdevs = network_layout['weight_stdevs']
-        
-        if network_layout.get('substitute_delays'):
-            self.delay_means = network_layout.get('delay_means', [-10.]*self.n_layers)
-        else:
-            self.delay_means = network_layout.get('delay_means', [0.]*self.n_layers)
-        self.delay_stdevs = network_layout.get('delay_stdevs', [0.]*self.n_layers)
-
-        self.threshold_means = network_layout.get('threshold_means', [sim_params['threshold']]*self.n_layers)
-        self.threshold_stdevs = network_layout.get('threshold_stdevs', [0.]*self.n_layers)
-
-        self.device = device
-
-        if 'bias_times' in network_layout.keys():
-            if len(network_layout['bias_times']) > 0 and isinstance(network_layout['bias_times'][0], (list, np.ndarray)):
-                self.bias_times = network_layout['bias_times']
-            else:
-                self.bias_times = [network_layout['bias_times']] * self.n_layers
-        else:
-            self.bias_times = []
-        self.biases = []
-        for i in range(self.n_layers):
-            bias = utils.to_device(utils.bias_inputs(self.n_biases[i], self.bias_times[i]), device)
-            self.biases.append(bias)
-
-        self.layers = torch.nn.ModuleList()
-        layer = utils.EqualtimeLayer(self.n_inputs, self.layer_sizes[0],
-                                     sim_params, (self.weight_means[0], self.weight_stdevs[0]),
-                                     (self.delay_means[0], self.delay_stdevs[0]),
-                                     (self.threshold_means[0], self.threshold_stdevs[0]),
-                                     device, self.n_biases[0])
-        self.layers.append(layer)
-        for i in range(self.n_layers - 1):
-            layer = utils.EqualtimeLayer(self.layer_sizes[i], self.layer_sizes[i + 1],
-                                         sim_params, (self.weight_means[i + 1], self.weight_stdevs[i + 1]),
-                                         (self.delay_means[i+1], self.delay_stdevs[i+1]),
-                                         (self.threshold_means[i+1], self.threshold_stdevs[i+1]),
-                                         device, self.n_biases[i + 1])
-            self.layers.append(layer)
-
-        self.rounding_precision = sim_params.get('rounding_precision')
-        self.rounding = self.rounding_precision not in (None, False)
-        self.sim_params = sim_params
-
-        if self.rounding:
-            print(f"#### Rounding the weights to precision {self.rounding_precision}")
-        return
-
-    def clip_weights(self):
-        if self.sim_params['clip_weights_max']:
-            for i, layer in enumerate(self.layers):
-                maxweight = self.sim_params['clip_weights_max']
-                self.layers[i].weights.data = torch.clamp(layer.weights.data, -maxweight, maxweight)
-        return
-
-    def forward(self, input_times):
-        # When rounding we need to save and manipulate weights before forward pass, and after
-        if self.rounding and not self.fast_eval:
-            float_weights = []
-            for layer in self.layers:
-                float_weights.append(layer.weights.data)
-                layer.weights.data = self.round_weights(layer.weights.data, self.rounding_precision)
-
-        # below, the actual pass through the layers of the network is defined, including the bias terms
-        hidden_times = []
-        for i in range(self.n_layers):
-            input_times_including_bias = torch.cat(
-                (input_times,
-                    self.biases[i].view(1, -1).expand(len(input_times), -1)),
-                1)
-            # n_spikes += len(self.biases[i]) leave out number of biases since it is insignificant for the number of spikes
-            output_times = self.layers[i](input_times_including_bias)
-            if not i == (self.n_layers - 1):
-                hidden_times.append(output_times)
-                input_times = output_times
-            else:
-                label_times = output_times
-        return_value = label_times, hidden_times
-
-        if self.rounding and not self.fast_eval:
-            for layer, floats in zip(self.layers, float_weights):
-                layer.weights.data = floats
-
-        return return_value
-
-    def round_weights(self, weights, precision):
-        return (weights / precision).round() * precision
-
-    def spike_percentages(self, output_times, hidden_times):
-        """
-        Compute the ratio of neurons that spike during a forward pass.
-        
-        Return 
-            one ratio for each layer, e.g. 0.5, (1.0,0.5) for one output layer and two hidden ones
-        """
-        n_output = torch.isfinite(output_times).sum(dim=1).float().mean() # sum over spikes and average over batches
-        n_hidden = [torch.isfinite(hidden).sum(dim=1).float().mean() for hidden in hidden_times]
-        output_percentage = n_output / self.layer_sizes[-1]
-        hidden_percentages = [n_hidden[i] / self.layer_sizes[-2-i] for i in range(self.n_layers-1)]
-        return output_percentage, hidden_percentages
 
 
 def load_data(dirname, filename, dataname):
@@ -285,13 +174,15 @@ def save_data(dirname, filename, net, all_parameters, train_losses, train_accura
     np.save(dirname + filename + '_spike_percentages.npy', spike_percentages)
     return
 
-def save_loss_plot(training_progress, trainloader, path=None, spike_percentages=None):
+def save_loss_plot(training_progress, trainloader, path=None, spike_percentages=None, start_epoch=0):
     save_path = 'live_accuracy.png'
+    if start_epoch != 0:
+        save_path = 'live_accuracy_continued.png'
     if path:
-        save_path = os.path.join(path, 'live_accuracy.png')
+        save_path = os.path.join(path, save_path)
     fig, ax = plt.subplots(1, 1)
     tmp = 1. - running_mean(training_progress, N=30)
-    ax.plot(np.arange(len(tmp)) / len(trainloader), tmp, c="k", label="error")
+    ax.plot(start_epoch + np.arange(len(tmp)) / len(trainloader), tmp, c="k", label="error")
     ax.set_ylim(0.005, 1.0)
     ax.set_yscale('log')
     ax.set_xlabel("epochs")
@@ -307,8 +198,8 @@ def save_loss_plot(training_progress, trainloader, path=None, spike_percentages=
         n_layers = len(spike_percentages)
         for i in range(n_layers-1):
             hidden_percentage = running_mean(spike_percentages[-1-i], N=30)
-            ax2.plot(np.arange(len(hidden_percentage)) / len(trainloader), hidden_percentage, label=f'layer {1+i} spike ratio')
-        ax2.plot(np.arange(len(output_percentage)) / len(trainloader), output_percentage, label=f"layer {n_layers} spike ratio")
+            ax2.plot(start_epoch + np.arange(len(hidden_percentage)) / len(trainloader), hidden_percentage, label=f'layer {1+i} spike ratio')
+        ax2.plot(start_epoch + np.arange(len(output_percentage)) / len(trainloader), output_percentage, label=f"layer {n_layers} spike ratio")
         # ax2.spines['right'].set_color('grey')
         ax2.set_ylabel("neuron spike ratio (running mean of 30 batches)")
         ax2.set_ylim(0.45, 1.05)
@@ -426,7 +317,7 @@ def apply_noise(input_times, noise_params, device):
 def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, trainloader, valloader,
                num_classes, all_parameters, all_train_loss, all_validate_loss, std_validate_outputs_sorted,
                mean_validate_outputs_sorted, tmp_training_progress, all_validate_accuracy,
-               all_train_accuracy, weight_bumping_steps, spike_percentages, training_params):
+               all_train_accuracy, weight_bumping_steps, spike_percentages, training_params, start_epoch=0):
     bump_val = training_params['weight_bumping_value']
     last_weights_bumped = -2  # means no bumping happened last time
     last_learning_rate = 0  # for printing learning rate at beginning
@@ -484,7 +375,7 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                 [print(f'ratio of hidden spikes in layer {i}: {hidden_percentages[-i]:.3f}') for i in range(1,net.n_layers)]
                 print(f'ratio of output spikes in layer {net.n_layers}: {output_percentage:.3f}')
                 if live_plot:
-                    save_loss_plot(tmp_training_progress, trainloader, spike_percentages=spike_percentages)
+                    save_loss_plot(tmp_training_progress, trainloader, spike_percentages=spike_percentages, start_epoch=start_epoch)
 
         if len(train_loss) > 0:
             all_train_loss.append(np.mean(train_loss))
@@ -554,6 +445,22 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
 
 def train(training_params, network_layout, neuron_params, dataset_train, dataset_val, dataset_test,
           foldername='tmp', filename=''):
+    """
+    Train the SNN model using given data and configuration parameters.
+
+    Parameters:
+        training_params: the parameters of the training process
+        network_layout: sizes of the network layers and biases
+        neuron_params: parameters of the spiking neurons
+        dataset_train: data to use for training
+        dataset_val: data to use for evaluation
+        dataset_test: data to use for testing
+        foldername: folder to save the current experiment in
+        filename: name of the used dataset
+
+    Returns:
+        net: the trained network
+    """
     if not training_params['torch_seed'] is None:
         torch.manual_seed(training_params['torch_seed'])
     if not training_params['numpy_seed'] is None:
@@ -612,7 +519,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     save_untrained_network(foldername, filename, net)
 
     print("loss function")
-    criterion = utils.GetLoss(training_params, 
+    criterion = losses.GetLoss(training_params, 
                               network_layout['layer_sizes'][-1],
                               sim_params['tau_syn'], device)
 
@@ -734,11 +641,28 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     if foldername:
         loss_plot_path = os.path.join('../experiment_results', foldername)
         save_loss_plot(tmp_training_progress, loader_train, path=loss_plot_path, spike_percentages=spike_percentages)
+    
     return net
 
 
 def continue_training(dirname, filename, start_epoch, savepoints, dataset_train, dataset_val, dataset_test,
                       net=None):
+    """
+    Continue a previously started training process.
+
+    Parameters:
+        dirname: directory in which the training was saved
+        filename: name of the dataset
+        start_epoch: point at which to continue the training process. If the net is not passed explicitly, this has to be one of the previous training's savepoints.
+        savepoints: comma-separated epochs at which the current state is saved, e.g. 100,150
+        dataset_train: data to use for training
+        dataset_val: data to use for evaluation
+        dataset_test: data to use for testing
+        net: network to use for training, optional. If None, the network which was saved at start_epoch is loaded
+
+    Returns:
+        net: network after continuing the training
+    """
     dirname_long = dirname + '/epoch_{}/'.format(start_epoch)
     dataset, neuron_params, network_layout, training_params = load_config(osp.join(dirname_long, "config.yaml"))
     if not training_params['torch_seed'] is None:
@@ -747,19 +671,17 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         np.random.seed(training_params['numpy_seed'])
     weight_bumping_steps = []
     tmp_training_progress = []
-    spike_percentages = list(load_data(dirname_long, filename, '_spike_percentages.npy'))
+    spike_percentages = [list(elem) for elem in load_data(dirname_long, filename, '_spike_percentages.npy')]
     all_train_loss = list(load_data(dirname_long, filename, '_train_losses.npy'))
     all_train_accuracy = list(load_data(dirname_long, filename, '_train_accuracies.npy'))
     all_validate_loss = list(load_data(dirname_long, filename, '_val_losses.npy'))
     all_validate_accuracy = list(load_data(dirname_long, filename, '_val_accuracies.npy'))
     all_parameters = {
-        key: list(load_data(dirname_long, filename, '_{}_training.npy'.format(key))) \
+        key: [list(elem) for elem in load_data(dirname_long, filename, '_{}_training.npy'.format(key))] \
             for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"] 
     }
-    mean_validate_outputs_sorted = list(load_data(dirname_long, filename, '_mean_val_outputs_sorted.npy'))
-    mean_validate_outputs_sorted = [list(item) for item in mean_validate_outputs_sorted]
-    std_validate_outputs_sorted = list(load_data(dirname_long, filename, '_std_val_outputs_sorted.npy'))
-    std_validate_outputs_sorted = [list(item) for item in std_validate_outputs_sorted]
+    mean_validate_outputs_sorted = [list(elem) for elem in load_data(dirname_long, filename, '_mean_val_outputs_sorted.npy')]
+    std_validate_outputs_sorted = [list(elem) for elem in load_data(dirname_long, filename, '_std_val_outputs_sorted.npy')]
 
     if 'enforce_cpu' in training_params.keys() and training_params['enforce_cpu']:
         device = torch.device('cpu')
@@ -767,7 +689,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         device = torch.device('mps')
     else:
         device = utils.get_default_device()
-    if not device in ['cpu', 'mps']:
+    if not str(device) in ['cpu', 'mps']:
         torch.cuda.manual_seed(training_params['torch_seed'])
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -810,7 +732,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         return net
 
     print("loading optimizer and scheduler")
-    criterion = utils.GetLoss(training_params,
+    criterion = losses.GetLoss(training_params,
                               network_layout['layer_sizes'][-1],
                               sim_params['tau_syn'], device)
     optimizer, scheduler, torch_rand_state, numpy_rand_state = load_optim_state(
@@ -873,7 +795,8 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
             mean_validate_outputs_sorted,
             tmp_training_progress, all_validate_accuracy,
             all_train_accuracy, weight_bumping_steps,
-            spike_percentages, training_params)
+            spike_percentages, training_params,
+            start_epoch=start_epoch)
         print('Ending training from epoch {0} to epoch {1}'.format(e_start, e_end))
         all_parameters = result_dict['all_parameters']
         all_train_loss = result_dict['all_train_loss']
@@ -889,6 +812,11 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
                   all_train_accuracy, all_validate_loss, all_validate_accuracy,
                   validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted,
                   spike_percentages, epoch_dir=(True, e_end))
+
+        # also save the loss curve in the results folder
+        if dirname:
+            loss_plot_path = osp.join('../experiment_results', dirname, 'epoch_{}/'.format(e_end))
+            save_loss_plot(tmp_training_progress, loader_train, path=loss_plot_path, spike_percentages=spike_percentages, start_epoch=start_epoch)
 
         # evaluate on test set
         return_input = False
@@ -915,5 +843,10 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
     save_data(dirname, filename, net, all_parameters, all_train_loss,
               all_train_accuracy, all_validate_loss, all_validate_accuracy,
               validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted, spike_percentages)
+
+    # also save the loss curve in the results folder
+    if dirname:
+        loss_plot_path = os.path.join('../experiment_results', dirname)
+        save_loss_plot(tmp_training_progress, loader_train, path=loss_plot_path, spike_percentages=spike_percentages, start_epoch=start_epoch)
 
     return net

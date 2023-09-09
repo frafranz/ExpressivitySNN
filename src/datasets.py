@@ -155,7 +155,7 @@ class FullMnist(Dataset):
         return len(self.cs)
 
 
-class HicannMnist(Dataset):
+class CroppedMnist(Dataset):
     def __init__(self, which='train', width_pixel=16, zero_at=0.15, one_at=2., invert=True, late_at_inf=False):
         self.cs = []
         self.vals = []

@@ -28,8 +28,8 @@ network_layout:
 training_params:
   batch_size: 150
   batch_size_eval: 200
-  enforce_cpu: True
-  enforce_mps: False
+  enforce_cpu: true
+  enforce_mps: false
   epoch_number: 150
   epoch_snapshots: [10, 50, 100]
   learning_rate: 0.005

@@ -6,9 +6,10 @@ import torch
 import unittest
 
 import utils
+from spiking_layer import SpikingLayer
 
 
-class TestIntegratorVsTimebased(unittest.TestCase):
+class TestEventbasedVsDiscretized(unittest.TestCase):
     @classmethod
     def setUp(self) -> None:
         self.num_input = 120
@@ -39,6 +40,7 @@ class TestIntegratorVsTimebased(unittest.TestCase):
             # 'tau_syn': 1.,
         }
 
+    # @unittest.skip("faster testing")
     def test_nograd(self):
         """
         Testing the forward pass of the network
@@ -78,10 +80,10 @@ class TestIntegratorVsTimebased(unittest.TestCase):
         thresholds = torch.ones(self.num_output)
 
         print("### generating layers")
-        layer_eventbased = utils.EqualtimeLayer(
+        layer_eventbased = SpikingLayer(
             self.num_input, self.num_output, self.sim_params_eventbased, weights, delays, thresholds,
             device, 0)
-        layer_integrator = utils.EqualtimeLayer(
+        layer_integrator = SpikingLayer(
             self.num_input, self.num_output, sim_params_integrator, weights, delays, thresholds,
             device, 0)
 
@@ -161,7 +163,7 @@ class TestIntegratorVsTimebased(unittest.TestCase):
             np.all(np.diff(differences_l2) <= 0),
             "The l2 norms are not decreasing with increasing integrator resolution, see plot.")
         
-
+    # @unittest.skip("faster testing")
     def test_nograd_with_delta(self):
         """
         Also test the integrator with non-infinite delta.
@@ -201,7 +203,7 @@ class TestIntegratorVsTimebased(unittest.TestCase):
         thresholds = torch.ones(self.num_output)
 
         print("### generating integrator layer")
-        layer_integrator = utils.EqualtimeLayer(
+        layer_integrator = SpikingLayer(
             self.num_input, self.num_output, sim_params_integrator, weights, delays, thresholds,
             device, 0)
 

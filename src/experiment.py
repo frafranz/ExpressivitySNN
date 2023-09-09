@@ -1,10 +1,5 @@
-#!python3
 import datetime
-import matplotlib.pyplot as plt
-import numpy as np
-import os
 import os.path as osp
-from pprint import pprint
 import sys
 import time
 import torch
@@ -53,9 +48,9 @@ if __name__ == '__main__':
             print(f"using mnist reduced to {width_pixel}x{width_pixel}, not usual 16x16")
             print("*********************************************")
             network_layout['n_inputs'] = width_pixel**2
-        dataset_train = datasets.HicannMnist('train', late_at_inf=True, width_pixel=width_pixel)
-        dataset_val = datasets.HicannMnist('val', late_at_inf=True, width_pixel=width_pixel)
-        dataset_test = datasets.HicannMnist('test', late_at_inf=True, width_pixel=width_pixel)
+        dataset_train = datasets.CroppedMnist('train', late_at_inf=True, width_pixel=width_pixel)
+        dataset_val = datasets.CroppedMnist('val', late_at_inf=True, width_pixel=width_pixel)
+        dataset_test = datasets.CroppedMnist('test', late_at_inf=True, width_pixel=width_pixel)
     else:
         sys.exit("data set given in parameter file is unknown")
     filename = dataset
@@ -74,14 +69,7 @@ if __name__ == '__main__':
         dirname = '../experiment_results/' + dirname + f"/epoch_{training_params['epoch_number']}/"
         device = utils.get_default_device()
         untrained = False
-    elif mode in ['eval', 'inference']:
-        dirname = sys.argv[2]
-        device = utils.get_default_device()
-        untrained = False
-        if len(sys.argv) > 3 and sys.argv[3] == 'eval_untrained':
-            untrained = True
-        net = None
-    elif mode in ['continue', 'fast_eval']:
+    elif mode == 'continue':
         dirname = sys.argv[2]
         start_epoch = int(sys.argv[3])
         savepoints = sys.argv[4].split(',')
@@ -97,8 +85,15 @@ if __name__ == '__main__':
         dirname = dirname + f"/epoch_{savepoints[-1]}/"
         device = utils.get_default_device()
         untrained = False
+    elif mode in ['eval', 'inference']:
+        dirname = sys.argv[2]
+        device = utils.get_default_device()
+        untrained = False
+        if len(sys.argv) > 3 and sys.argv[3] == 'eval_untrained':
+            untrained = True
+        net = None
     else:
-        raise IOError("argument must be train, eval, continue or inference")
+        raise IOError("argument must be train, continue, eval or inference")
 
     if mode == 'inference':
         outputs, selected_classes, labels, _, _ = evaluation.run_inference(

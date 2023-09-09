@@ -1,4 +1,3 @@
-#!python3
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as mpl_gs
@@ -7,7 +6,7 @@ import os
 import os.path as osp
 import torch
 
-import utils, training
+import utils, training, losses
 
 
 def run_inference(dirname, filename, datatype, dataset, untrained, reference, device=None,
@@ -19,7 +18,7 @@ def run_inference(dirname, filename, datatype, dataset, untrained, reference, de
     else:
         basename = filename
     _, neuron_params, network_layout, training_params = training.load_config(osp.join(dirname, "config.yaml"))
-    criterion = utils.GetLoss(training_params,
+    criterion = losses.GetLoss(training_params,
                               network_layout['layer_sizes'][-1],
                               neuron_params['tau_syn'], device)
 
@@ -333,7 +332,6 @@ def weight_histograms(dirname='tmp', filename='', show=False, device=None):
         print(f"No untrained network '{filename}_untrained_network.pt' found in {dirname} or {dirname}/..")
         print("*" * 30)
         return
-    # this can not run inference on hicannx currently
     num_layers = len(net.layers)
     fig, axes = plt.subplots(num_layers, 1, sharex=True, figsize=(10, 10))
     fig.suptitle('Weight histograms after training')
@@ -359,7 +357,6 @@ def weight_matrix(dirname='tmp', filename='', device=None):
     if device is None:
         device = torch.device('cpu')
     net = utils.network_load(dirname, filename, device)
-    # this can not run inference on hicannx currently
     num_layers = len(net.layers)
     for i in range(num_layers):
         fig, axes = plt.subplots(1, 1, figsize=(10, 10))

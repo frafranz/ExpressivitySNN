@@ -1,4 +1,3 @@
-#!python3
 import numpy as np
 import os
 import torch
@@ -47,15 +46,18 @@ else:
 def get_spiketime(input_spikes, input_weights, thresholds, neuron_params, device):
     """Calculating spike times, all at once.
 
-    Called from EqualtimeFunction below, for each layer.
-    Dimensions are crucial:
-        input weights and (delayed) input spikes have dimension BATCHESxNxM with N pre and M postsynaptic neurons, 
-        where the last coordinate represents the output neuron for which the input is considered
-        thresholds have dimension M, corresponding to all postsynaptic neurons
-    The functions relies on the incoming spike time with their respective weights being sorted.
+    Called from the explicit spiketime simulation, for each layer. The function relies on the incoming spike times with their respective weights being sorted.
 
-    The return value (n_batch, n_presyn, n_postsyn) contains the time of on outgoing spike to neuron n_postsyn (for n_batch),
-    given that all input spikes up to the one at n_presyn have arrived.
+    Parameters:
+        (delayed) input_spikes, input weights: have dimension BATCHESxNxM with N pre and M postsynaptic neurons, 
+        where the last coordinate represents the output neuron for which the input is considered
+        thresholds: have dimension M, corresponding to all postsynaptic neurons
+        neuron_params: parameters of the spiking neuron
+        device: device to operate on
+    
+    Returns:
+        Of shape (n_batch, n_presyn, n_postsyn), contains the time of on outgoing spike to neuron n_postsyn (for n_batch),
+        given that all input spikes up to the one at n_presyn have arrived.
     """
     n_batch, n_presyn, n_postsyn = input_spikes.shape
     n_batch2, n_presyn2, n_postsyn2 = input_weights.shape

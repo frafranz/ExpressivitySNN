@@ -2,7 +2,7 @@ import unittest
 import torch
 from torch.testing import assert_close
 
-from utils_spiketime_linear import get_spiketime, get_spiketime_derivative
+from spiketimes.piecewise_linear import get_spiketime, get_spiketime_derivative
 
 
 class TestSpiketimeLinear(unittest.TestCase):

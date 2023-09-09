@@ -1,7 +1,7 @@
 import unittest
 import time
 
-import utils, training, datasets
+import training, datasets
 
 
 class TestExperiment(unittest.TestCase):
@@ -11,7 +11,6 @@ class TestExperiment(unittest.TestCase):
         """
 
         # set up datasets, configs
-        dataset = "xor"
         neuron_params = {
             "activation": "linear",
             "g_leak": 1.0,
@@ -55,7 +54,6 @@ class TestExperiment(unittest.TestCase):
             "train_threshold": False,
             "training_noise": {"mean": 0.0, "std_dev": 0.2},
             "use_forward_integrator": False,
-            "use_hicannx": False,
             "weight_bumping_exp": True,
             "weight_bumping_targeted": True,
             "weight_bumping_value": 0.0005,

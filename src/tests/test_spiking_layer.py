@@ -2,10 +2,10 @@ import unittest
 import torch
 from torch.testing import assert_close
 
-from utils import EqualtimeLayer
+from spiking_layer import SpikingLayer
 
 
-class TestEqualtimeLayer(unittest.TestCase):
+class TestSpikingLayer(unittest.TestCase):
     def test_init(self):
         """
         Test the initialization of one layer of the SNN, with randomized weights, delays and threshold.
@@ -19,7 +19,7 @@ class TestEqualtimeLayer(unittest.TestCase):
         threshold_init = (1, 0.1) # also randomized thresholds
         device = "cpu"
         bias = 0 # number of bias inputs
-        layer = EqualtimeLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
+        layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
 
     def test_forward(self):
         """
@@ -34,7 +34,7 @@ class TestEqualtimeLayer(unittest.TestCase):
         threshold_init = torch.ones(output_features)
         device = "cpu"
         bias = 0 # number of bias inputs
-        layer = EqualtimeLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
+        layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
         output_spikes = layer(input_spikes)
@@ -54,7 +54,7 @@ class TestEqualtimeLayer(unittest.TestCase):
         threshold_init = torch.ones(output_features) # n_out
         device = "cpu"
         bias = 0 # number of bias inputs
-        layer = EqualtimeLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
+        layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
         output_spikes = layer(input_spikes)
@@ -78,7 +78,7 @@ class TestEqualtimeLayer(unittest.TestCase):
         threshold_init = torch.tensor([.5, 1., 2.]) # n_out
         device = "cpu"
         bias = 0 # number of bias inputs
-        layer = EqualtimeLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
+        layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
         output_spikes = layer(input_spikes)
@@ -101,7 +101,7 @@ class TestEqualtimeLayer(unittest.TestCase):
         threshold_init = torch.tensor([.5, 1., 2.]) # n_out
         device = "cpu"
         bias = 0 # number of bias inputs
-        layer = EqualtimeLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
+        layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
         output_spikes = layer(input_spikes)
