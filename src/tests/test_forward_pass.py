@@ -96,12 +96,10 @@ class TestEventbasedVsDiscretized(unittest.TestCase):
         print("### looping integrator passed with different resolutions")
         differences_l1, differences_l2 = [], []
         int_infs = []
-        for resol in self.resols:
+        for resol in self.resols: # need to adapt these parameters within the layer instance since the resolution changes
             layer_integrator.sim_params['resolution'] = resol
             layer_integrator.sim_params['steps'] = int(np.ceil(sim_params_integrator['sim_time'] / resol))
-            layer_integrator.sim_params['decay_syn'] = float(np.exp(-resol / sim_params_integrator['tau_syn']))
-            layer_integrator.sim_params['decay_mem'] = float(np.exp(-resol / sim_params_integrator['tau_syn']))
-
+            
             assert self.input_binsize >= layer_integrator.sim_params['resolution'], \
                 "inputs are binned too weakly compared to resolution"
 
@@ -117,11 +115,11 @@ class TestEventbasedVsDiscretized(unittest.TestCase):
 
             # mean_difference = torch.mean(torch.abs(outputs_eventbased - outputs_integrator))
             # max_difference = torch.max(torch.abs(outputs_eventbased - outputs_integrator))
-            difference_nonnan = outputs_eventbased - outputs_integrator
-            difference_nonnan[torch.isnan(difference_nonnan)] = 0
-            difference_l1 = torch.sum(torch.abs(difference_nonnan))
+            difference_finite = outputs_eventbased - outputs_integrator
+            difference_finite[~torch.isfinite(difference_finite)] = 0
+            difference_l1 = torch.sum(torch.abs(difference_finite))
             differences_l1.append(difference_l1)
-            difference_l2 = torch.sqrt(torch.sum((difference_nonnan)**2))
+            difference_l2 = torch.sqrt(torch.sum((difference_finite)**2))
             differences_l2.append(difference_l2)
             if self.debug:
                 print(f"#####               difference_l1 {difference_l1}")
@@ -147,7 +145,7 @@ class TestEventbasedVsDiscretized(unittest.TestCase):
                 label="number of infs in integrator", color='C3')
         ax2.axhline(float(outputs_eventbased_inf.sum()) / (self.batch_size * self.num_output),
                     label="number of infs in evba", color='C3')
-        ax2.set_ylim(min(int_infs) - 0.1, max(int_infs) + 0.1)
+        # ax2.set_ylim(min(int_infs) - 0.1, max(int_infs) + 0.1)
         ax2.set_ylabel('fraction infs')
 
         ax.legend()
@@ -211,8 +209,7 @@ class TestEventbasedVsDiscretized(unittest.TestCase):
         for resol in self.resols:
             layer_integrator.sim_params['resolution'] = resol
             layer_integrator.sim_params['steps'] = int(np.ceil(sim_params_integrator['sim_time'] / resol))
-            layer_integrator.sim_params['decay_syn'] = float(np.exp(-resol / sim_params_integrator['tau_syn']))
-            layer_integrator.sim_params['decay_mem'] = float(np.exp(-resol / sim_params_integrator['tau_syn']))
+            layer_integrator.sim_params['delta_in_steps'] = int(np.ceil(sim_params_integrator['delta'] / resol))
 
             assert self.input_binsize >= layer_integrator.sim_params['resolution'], \
                 "inputs are binned too weakly compared to resolution"

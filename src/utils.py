@@ -1,4 +1,3 @@
-#!python3
 import numpy as np
 import os.path as osp
 import sys

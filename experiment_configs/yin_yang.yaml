@@ -1,6 +1,6 @@
 dataset: yin_yang
 neuron_params:
-  activation: linear
+  activation: linear # linear, alpha_equaltime, alpha_doubletime
   g_leak: 1.0
   leak: 0.0
   tau_syn: 1.0

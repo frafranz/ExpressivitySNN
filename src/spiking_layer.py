@@ -36,7 +36,7 @@ class SpikingLayer(torch.nn.Module):
             self.sim_params['decay_mem'] = float(np.exp(-sim_params['resolution'] / sim_params['tau_syn']))
             if self.sim_params.get('delta'):
                 self.sim_params['delta_in_steps'] = int(np.ceil(sim_params['delta'] / sim_params['resolution']))
-
+                
         self.weights = torch.nn.Parameter(torch.Tensor(input_features + bias, output_features))
         self.delays = torch.nn.Parameter(torch.Tensor(input_features + bias, output_features))
         self.thresholds = torch.nn.Parameter(torch.Tensor(output_features))
