@@ -89,7 +89,7 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     tau_mem = neuron_params['tau_mem']
     exponentiated_spike_times_syn = torch.exp(input_spikes / tau_syn)
     exponentiated_spike_times_mem = torch.exp(input_spikes / tau_mem)
-    exponentiated_spike_times_out_mem = torch.exp(output_spikes / tau_mem)
+    exponentiated_spike_times_out_mem = torch.exp(output_spikes / tau_mem).unsqueeze(1)
 
     eps = 1e-6
     factor_a1 = torch.sum(exponentiated_spike_times_syn * causal_weights, dim=1, keepdim=True) + eps
