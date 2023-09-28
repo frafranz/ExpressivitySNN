@@ -73,7 +73,8 @@ class SpikingLayer(torch.nn.Module):
             input_times: incoming spike times
 
         Returns:
-            the outgoing spike times from this layer
+            output_spikes: the outgoing spike times from this layer
+            spike_contributions: whether input spikes contributed to output spikes
         """
         if self.use_forward_integrator:
             return TimeDiscretized.apply(input_times, self.weights, self.delays, self.thresholds,

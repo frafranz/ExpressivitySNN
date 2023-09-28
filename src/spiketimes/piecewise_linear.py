@@ -66,7 +66,7 @@ def get_spiketime_derivative(input_spikes, input_weights, neuron_params, device,
     # set infinities to 0, preventing nans
     causal_weights[mask] = 0.
     input_spikes[torch.isinf(input_spikes)] = 0. # we are not working on the actual spike data but only on a sorted copy from gather
-    output_spikes[torch.isinf(output_spikes)] = 0. # TODO: here we use the actual output spike data, problem? (will not use output spike values anymore)
+    output_spikes[torch.isinf(output_spikes)] = 0. # remember we only work on copies of the output spike data here
 
     eps = 1e-10
     summed_weights = torch.clamp(torch.sum(causal_weights, 1, keepdim=True),min=eps) # here we sum only over contributing (causal) weights (negative summed weights would never cause a spike)

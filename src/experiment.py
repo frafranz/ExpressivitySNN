@@ -21,26 +21,30 @@ if __name__ == '__main__':
     else:
         config_path = osp.join(sys.argv[2], "config.yaml")
     dataset, neuron_params, network_layout, training_params = training.load_config(config_path)
+    input_interval = network_layout.get('input_interval')
+    early, late = None, None
+    if input_interval:
+        early, late = input_interval
 
     if dataset == "yin_yang":
         multiply_input_layer = 1
         multiply_bias = 1
-        dataset_train = datasets.YinYangDataset(size=5000, seed=42, multiply_input_layer=multiply_input_layer)
-        dataset_val = datasets.YinYangDataset(size=1000, seed=41, multiply_input_layer=multiply_input_layer)
-        dataset_test = datasets.YinYangDataset(size=1000, seed=40, multiply_input_layer=multiply_input_layer)
+        dataset_train = datasets.YinYangDataset(size=5000, seed=42, early=early, late=late, multiply_input_layer=multiply_input_layer)
+        dataset_val = datasets.YinYangDataset(size=1000, seed=41, early=early, late=late, multiply_input_layer=multiply_input_layer)
+        dataset_test = datasets.YinYangDataset(size=1000, seed=40, early=early, late=late, multiply_input_layer=multiply_input_layer)
     elif dataset == "bars":
         multiply_input_layer = 1
-        dataset_train = datasets.BarsDataset(3, noise_level=0, multiply_input_layer=multiply_input_layer)
-        dataset_val = datasets.BarsDataset(3, noise_level=0, multiply_input_layer=multiply_input_layer)
-        dataset_test = datasets.BarsDataset(3, noise_level=0, multiply_input_layer=multiply_input_layer)
+        dataset_train = datasets.BarsDataset(3, noise_level=0, early=early, late=late, multiply_input_layer=multiply_input_layer)
+        dataset_val = datasets.BarsDataset(3, noise_level=0, early=early, late=late, multiply_input_layer=multiply_input_layer)
+        dataset_test = datasets.BarsDataset(3, noise_level=0, early=early, late=late, multiply_input_layer=multiply_input_layer)
     elif dataset == "xor":
         dataset_train = datasets.XOR()
         dataset_val = datasets.XOR()
         dataset_test = datasets.XOR()
     elif dataset == "mnist":
-        dataset_train = datasets.FullMnist('train')
-        dataset_val = datasets.FullMnist('val')
-        dataset_test = datasets.FullMnist('test')
+        dataset_train = datasets.FullMnist('train', early=early, late=late)
+        dataset_val = datasets.FullMnist('val', early=early, late=late)
+        dataset_test = datasets.FullMnist('test', early=early, late=late)
     elif dataset == "16x16_mnist":
         width_pixel = network_layout.get('width_pixel', 16)
         if width_pixel != 16:
@@ -48,9 +52,9 @@ if __name__ == '__main__':
             print(f"using mnist reduced to {width_pixel}x{width_pixel}, not usual 16x16")
             print("*********************************************")
             network_layout['n_inputs'] = width_pixel**2
-        dataset_train = datasets.CroppedMnist('train', late_at_inf=True, width_pixel=width_pixel)
-        dataset_val = datasets.CroppedMnist('val', late_at_inf=True, width_pixel=width_pixel)
-        dataset_test = datasets.CroppedMnist('test', late_at_inf=True, width_pixel=width_pixel)
+        dataset_train = datasets.CroppedMnist('train', early=early, late=late, late_at_inf=True, width_pixel=width_pixel)
+        dataset_val = datasets.CroppedMnist('val', early=early, late=late, late_at_inf=True, width_pixel=width_pixel)
+        dataset_test = datasets.CroppedMnist('test', early=early, late=late, late_at_inf=True, width_pixel=width_pixel)
     else:
         sys.exit("data set given in parameter file is unknown")
     filename = dataset
@@ -93,7 +97,7 @@ if __name__ == '__main__':
             untrained = True
         net = None
     else:
-        raise IOError("argument must be train, continue, eval or inference")
+        raise IOError("argument must be train, continue, eval, continue or inference")
 
     if mode == 'inference':
         outputs, selected_classes, labels, _, _ = evaluation.run_inference(

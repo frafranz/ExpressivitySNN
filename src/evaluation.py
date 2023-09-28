@@ -86,7 +86,7 @@ def run_inference(dirname, filename, datatype, dataset, untrained, reference, de
             if not inputs.dtype == torch.float64:
                 inputs = inputs.double()
             input_times = utils.to_device(inputs, device)
-            outputs, hiddens = net(input_times)
+            outputs, hiddens = net(input_times)[0]
             all_outputs.append(outputs)
             all_labels.append(labels)
             all_inputs.append(inputs)
@@ -820,7 +820,7 @@ def compare_voltages(dirname, filename, dataset, device=None, return_all=False, 
             for i, data in enumerate(loader):
                 inputs, labels = data
                 input_times = utils.to_device(torch.tensor(inputs, dtype=torch.float64), device)
-                outputs, hiddens = net(input_times)
+                outputs, hiddens = net(input_times)[0]
                 break
             np.save(osp.join(dirname, filename + '_membrane_points.npy'), inputs)
             np.save(osp.join(dirname, filename + '_membrane_labels.npy'), labels)

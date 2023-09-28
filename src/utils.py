@@ -1,6 +1,4 @@
-import numpy as np
 import os.path as osp
-import sys
 import time
 import torch
 import torch.nn
@@ -29,6 +27,12 @@ def to_device(data, device):
         return [to_device(x, device) for x in data]
     return data.to(device, non_blocking=True)
 
+
+def in_evaluation():
+    # check if the gradient calculation is turned off, i.e. we are in evaluation mode of the 
+    x = torch.tensor([1.,2.,3.], requires_grad=True)
+    y = x**2
+    return not y.requires_grad
 
 class DeviceDataLoader():
     # Wrap a dataloader to move data to device

@@ -37,7 +37,7 @@ class TestSpikingLayer(unittest.TestCase):
         layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
-        output_spikes = layer(input_spikes)
+        output_spikes, _ = layer(input_spikes) # ignore spike contributions
         output_spikes_solution = torch.tensor([[11./40., 13./40., 1.1], [1./3., 5./8., 1.5]]) # n_batch x n_out
         assert_close(output_spikes,output_spikes_solution)
 
@@ -57,7 +57,7 @@ class TestSpikingLayer(unittest.TestCase):
         layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
-        output_spikes = layer(input_spikes)
+        output_spikes, _ = layer(input_spikes) # ignore spike contributions
         output_spikes_solution = torch.tensor([
             [(1+3*(0+0.1)+1*(0.1+0.01))/4., (1+1*(0+0.05)+3*(0.1+0.2))/4., (1+0*(0+0.3)+1*(0.1+0.5))/1.],
             [(1+3*(0+0.1))/3., (1+1*(0+0.05)+3*(0.5+0.2))/4., (1+0*(0+0.3)+1*(0.5+0.5))/1.]
@@ -81,7 +81,7 @@ class TestSpikingLayer(unittest.TestCase):
         layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
-        output_spikes = layer(input_spikes)
+        output_spikes, _ = layer(input_spikes) # ignore spike contributions
         output_spikes_solution = torch.tensor([
             [(.5+3*(0+0.1)+1*(0.1+0.01))/4., (1+1*(0+0.05)+3*(0.1+0.2))/4., (2+0*(0+0.3)+1*(0.1+0.5))/1.],
             [(.5+3*(0+0.1))/3., (1+1*(0+0.05)+3*(0.5+0.2))/4., (2+0*(0+0.3)+1*(0.5+0.5))/1.]
@@ -104,7 +104,7 @@ class TestSpikingLayer(unittest.TestCase):
         layer = SpikingLayer(input_features, output_features, sim_params, weights_init, delays_init, threshold_init, device, bias)
         input_spikes = torch.tensor([[0.1, 0], [0.5,0]]) # n_batch x n_inputs (at this step, the inputs are not yet ordered)
         device = "cpu"
-        output_spikes = layer(input_spikes)
+        output_spikes, _ = layer(input_spikes) # ignore spike contributions
         output_spikes_solution = torch.tensor([
             [(.5+3*(0+0.1)+1*(0.1+0.01))/4., (1+1*(0+0.05)+3*(0.1+0.2))/4., (2+0*(0+0.3)+1*(0.1+0.5))/1.],
             [(.5+3*(0+0.1))/3., (1+1*(0+0.05)+3*(0.5+0.2))/4., (2+0*(0+0.3)+1*(0.5+0.5))/1.]

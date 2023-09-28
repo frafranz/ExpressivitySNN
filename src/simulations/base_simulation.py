@@ -42,7 +42,7 @@ class BaseSimulation(torch.autograd.Function):
     
 
     @staticmethod
-    def backward(ctx, propagated_error):
+    def backward(ctx, propagated_error, spike_contribution_error):
         """
         Custom backward propagation function.
 
@@ -56,6 +56,7 @@ class BaseSimulation(torch.autograd.Function):
         Arguments:
             ctx: context variable from torch
             propapagated error: gradients with respect to output spike times to next layer
+            spike_contribution_error: error with respect to spike contributions, which is not used in the backward pass
 
         Returns:
             new_propagated_error: derivatives w.r.t. input spikes times
@@ -114,7 +115,7 @@ class BaseSimulation(torch.autograd.Function):
         delay_gradient = dd * error_to_work_with
         threshold_gradient = dtheta * error_to_work_with
 
-        if ctx.sim_params['max_dw_norm'] is not None: # TODO: ignored for now, adapt once we are training the new model
+        if ctx.sim_params['max_dw_norm'] is not None: # TODO: could adapt the weight clipping
             """ to prevent large weight changes, we identify output spikes with a very large dw
             this happens when neuron barely spikes, aka small changes determine whether it spikes or not
             technically, the membrane maximum comes close to the threshold,
@@ -130,7 +131,7 @@ class BaseSimulation(torch.autograd.Function):
             weight_gradient[weight_gradient_jumps] = 0. # permuting allows us to access the batch and output neuron with gradient_jumps
             weight_gradient = weight_gradient.permute([0, 2, 1]) # permute back to previous
 
-            # # TODO: for now just blindly copy the same steps for delay_gradient
+            # # TODO: could copy the same steps for delay_gradient
             # delay_gradient_norms, _ = delay_gradient.abs().max(dim=1)
             # delay_gradient_jumps = delay_gradient_norms > ctx.sim_params['max_dw_norm'] # TODO: if this clipping should be used for delay gradients, save max_dd_norm in config
             # if delay_gradient_jumps.sum() > 0:

@@ -15,7 +15,12 @@ class BarsDataset(Dataset):
                  samples_per_class=10,
                  multiply_input_layer=1):
         assert type(multiply_input_layer) == int
+        if early is None:
+            early = 0.05
+        if late is None:
+            late = 0.5
         debug = False
+
         self.__vals = []
         self.__cs = []
         ones = list(np.ones(square_size) + (late - 1.))
@@ -94,7 +99,12 @@ class BarsDataset(Dataset):
 
 
 class FullMnist(Dataset):
-    def __init__(self, which='train', zero_at=0.15, one_at=2., invert=True, late_at_inf=False):
+    def __init__(self, which='train', early=None, late=None, invert=True, late_at_inf=False):
+        if early is None:
+            early = 0.15
+        if late is None:
+            late = 2.
+
         self.cs = []
         self.vals = []
         self.class_names = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
@@ -126,9 +136,9 @@ class FullMnist(Dataset):
                     tmp_for_save.append(dat_flat)
                     if invert:
                         dat_flat = dat_flat * (-1.) + 1.  # make invert white and black
-                    dat_flat = zero_at + dat_flat * (one_at - zero_at)
+                    dat_flat = early + dat_flat * (late - early)
                     if late_at_inf:
-                        dat_flat[dat_flat == one_at] = np.inf # i.e. lowest values do not lead to any spikes
+                        dat_flat[dat_flat == late] = np.inf # i.e. lowest values do not lead to any spikes
                     self.vals.append(dat_flat)
             tmp_for_save = np.array([ii.cpu().detach().numpy() for ii in tmp_for_save])
             np.save(f"../data/mnist_{which}_label.npy",
@@ -143,9 +153,9 @@ class FullMnist(Dataset):
             for i, dat_flat in enumerate(tmp_data):
                 if invert:
                     dat_flat = dat_flat * (-1.) + 1.  # make invert white and black (ensured that saved data are not inverted / late at inf)
-                dat_flat = zero_at + dat_flat * (one_at - zero_at)
+                dat_flat = early + dat_flat * (late - early)
                 if late_at_inf:
-                    dat_flat[dat_flat == one_at] = np.inf
+                    dat_flat[dat_flat == late] = np.inf
                 self.vals.append(dat_flat)
 
     def __getitem__(self, index):
@@ -156,7 +166,12 @@ class FullMnist(Dataset):
 
 
 class CroppedMnist(Dataset):
-    def __init__(self, which='train', width_pixel=16, zero_at=0.15, one_at=2., invert=True, late_at_inf=False):
+    def __init__(self, which='train', width_pixel=16, early=None, late=None, invert=True, late_at_inf=False):
+        if early is None:
+            early = 0.15
+        if late is None:
+            late = 2.
+
         self.cs = []
         self.vals = []
         self.class_names = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
@@ -193,9 +208,9 @@ class CroppedMnist(Dataset):
                     tmp_for_save.append(dat_flat)
                     if invert:
                         dat_flat = dat_flat * (-1.) + 1.  # make invert white and black
-                    dat_flat = zero_at + dat_flat * (one_at - zero_at)
+                    dat_flat = early + dat_flat * (late - early)
                     if late_at_inf:
-                        dat_flat[dat_flat == one_at] = np.inf
+                        dat_flat[dat_flat == late] = np.inf
                     self.vals.append(dat_flat)
             tmp_for_save = np.array([ii.cpu().detach().numpy() for ii in tmp_for_save])
             np.save(f"../data/{width_pixel}x{width_pixel}_mnist_{which}_label.npy",
@@ -210,9 +225,9 @@ class CroppedMnist(Dataset):
             for i, dat_flat in enumerate(tmp_data):
                 if invert:
                     dat_flat = dat_flat * (-1.) + 1.  # make invert white and black
-                dat_flat = zero_at + dat_flat * (one_at - zero_at)
+                dat_flat = early + dat_flat * (late - early)
                 if late_at_inf:
-                    dat_flat[dat_flat == one_at] = np.inf
+                    dat_flat[dat_flat == late] = np.inf
                 self.vals.append(dat_flat)
 
     def __getitem__(self, index):
@@ -223,10 +238,15 @@ class CroppedMnist(Dataset):
 
 
 class YinYangDataset(Dataset):
-    def __init__(self, which='train', early=0.15, late=2.,
+    def __init__(self, which='train', early=None, late=None,
                  r_small=0.1, r_big=0.5, size=1000, seed=42,
                  multiply_input_layer=1):
         assert type(multiply_input_layer) == int
+        if early is None:
+            early = 0.15
+        if late is None:
+            late = 2.
+
         self.cs = []
         self.vals = []
 
@@ -255,10 +275,15 @@ class YinYangDataset(Dataset):
 
 
 class XOR(Dataset):
-    def __init__(self, which='train', early=0.15, late=2.,
+    def __init__(self, which='train', early=None, late=None,
                  r_small=0.1, r_big=0.5, size=1000, seed=42,
                  multiply_input_layer=1):
         assert multiply_input_layer == 1
+        if early is None:
+            early = 0.15
+        if late is None:
+            late = 2.        
+
         self.cs = []
         self.vals = []
         self.class_names = ['False', 'True']

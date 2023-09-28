@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from utils import to_device
+from utils import to_device, in_evaluation
 from simulations.base_simulation import BaseSimulation
 
 torch.set_default_dtype(torch.float64)
@@ -25,6 +25,7 @@ class Explicit(BaseSimulation):
 
         Returns:
             output_spikes:  outgoing spike times
+            spike_contributions_unsorted: whether input spikes contributed to output spikes
         """
         n_batch, _, delayed_input_spikes = BaseSimulation.prepare_inputs(input_spikes, input_weights, input_delays, thresholds, sim_params)
 
@@ -35,9 +36,9 @@ class Explicit(BaseSimulation):
         sorted_weights = torch.gather(input_weights.unsqueeze(0).expand(n_batch,-1,-1), dim=1, index=sort_indices) # output is of shape n_batch x n_pre x n_post
         # (in each batch) set weights=0 and spiketime=0 for neurons with inf spike time to prevent nans
         mask_of_inf_spikes = torch.isinf(sorted_spikes)
-        sorted_spikes_masked = sorted_spikes.clone().detach() # TODO: why detach here? means that these spikes are not part of the comp. graph, i.e. not trained?
+        sorted_spikes_masked = sorted_spikes.clone() # also keep the original spike times without masking 
         sorted_spikes_masked[mask_of_inf_spikes] = 0.
-        sorted_weights[mask_of_inf_spikes] = 0. # TODO: why no clone, detach for weights? (means setting them to 0 is actually part of the comp. graph?)
+        sorted_weights[mask_of_inf_spikes] = 0.
         
         output_spikes = to_device(torch.ones(input_weights.size()) * np.inf, device) # prepares the array for the output spikes on the device
 
@@ -66,11 +67,29 @@ class Explicit(BaseSimulation):
         tmp_output[after_next_input] = float('inf')
 
         output_spikes, causal_set_lengths = torch.min(tmp_output, dim=1) # take output spike happening after a minimum of incoming spikes (complexity: n_pre)
+        
+        # compute spike contributions
+        spike_contributions_unsorted = None
+        # TODO: better to only do in evaluation mode, i.e. not during normal training to save time
+        #if in_evaluation(): # case distinction did not work so far, always evaluated to True
+        
+        # if the output neuron never spikes, make sure that no spike is counted as contributing
+        causal_set_lengths[output_spikes==torch.inf] = -1
 
+        # evaluate which input contributed for each batch and output
+        spike_contributions = to_device(torch.zeros(tmp_output.shape, dtype=torch.bool), device)
+        # the causal set length is the index up to where we sum, i.e. max index means all spikes are used, 0 means only the first is used, -1 none since there is no output spike
+        n_inputs = input_spikes.shape[1]
+        for i in range(n_inputs):
+            spike_contributions[:,i,:] = (causal_set_lengths - i) >= 0
+
+        # revert sorting of input spikes
+        spike_contributions_unsorted = spike_contributions.gather(1, sort_indices.argsort(1))
+        
         ctx.sim_params = sim_params
         ctx.device = device
         ctx.save_for_backward(
             input_spikes, input_weights, input_delays, thresholds, output_spikes)
         if torch.isnan(output_spikes).sum() > 0:
             raise ArithmeticError("There are NaNs in the output times, this means a serious error occured")
-        return output_spikes
+        return output_spikes, spike_contributions_unsorted

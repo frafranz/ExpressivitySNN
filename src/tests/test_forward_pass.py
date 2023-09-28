@@ -90,7 +90,7 @@ class TestEventbasedVsDiscretized(unittest.TestCase):
         # eventbased will not change
         print("### one time eventbased forward pass")
         with torch.no_grad():
-            outputs_eventbased = layer_eventbased(times_input)
+            outputs_eventbased, _ = layer_eventbased(times_input) # note that the eventbased calculation also return spike contributions now
             outputs_eventbased_inf = torch.isinf(outputs_eventbased)
 
         print("### looping integrator passed with different resolutions")

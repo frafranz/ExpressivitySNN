@@ -37,6 +37,9 @@ class Net(torch.nn.Module):
         self.threshold_means = network_layout.get('threshold_means', [sim_params['threshold']]*self.n_layers)
         self.threshold_stdevs = network_layout.get('threshold_stdevs', [0.]*self.n_layers)
 
+        if network_layout.get('input_interval'):
+            self.input_interval = network_layout['input_interval']
+
         self.device = device
 
         if network_layout.get('bias_times'):
@@ -83,7 +86,8 @@ class Net(torch.nn.Module):
             input_times: incoming spike times
         
         Returns:
-            label_times, hidden_times: the spike times of the output layer and all hidden layers
+            spike_times: the spike times of the output layer and all hidden layers
+            spike_contributions: whether input spikes contributed to output spikes
         """
         # When rounding we need to save and manipulate weights before forward pass, and after
         if self.rounding:
@@ -94,25 +98,28 @@ class Net(torch.nn.Module):
 
         # below, the actual pass through the layers of the network is defined, including the bias terms
         hidden_times = []
+        hidden_contributions = []
         for i in range(self.n_layers):
             input_times_including_bias = torch.cat(
                 (input_times,
                     self.biases[i].view(1, -1).expand(len(input_times), -1)),
                 1)
-            # n_spikes += len(self.biases[i]) leave out number of biases since it is insignificant for the number of spikes
-            output_times = self.layers[i](input_times_including_bias)
+            output_times, contributions = self.layers[i](input_times_including_bias)
             if not i == (self.n_layers - 1):
                 hidden_times.append(output_times)
+                hidden_contributions.append(contributions)
                 input_times = output_times
             else:
                 label_times = output_times
-        return_value = label_times, hidden_times
+                label_contributions = contributions
+        spike_times = label_times, hidden_times
+        spike_contributions = label_contributions, hidden_contributions
 
         if self.rounding:
             for layer, floats in zip(self.layers, float_weights):
                 layer.weights.data = floats
 
-        return return_value
+        return spike_times, spike_contributions
 
     def spike_percentages(self, output_times, hidden_times):
         """

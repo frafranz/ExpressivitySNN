@@ -16,6 +16,7 @@ network_layout:
   # delay_stdevs: [0.01, 0.01]
   delay_stdevs: [0.5, 0.5]
   # delay_stdevs: [0.0, 0.0]
+  input_interval: [0.15, 2.]
   threshold_means : [1., 1.]
   # threshold_stdevs: [0.1, 0.1]
   threshold_stdevs: [0., 0.]
@@ -31,8 +32,9 @@ training_params:
   enforce_cpu: true
   enforce_mps: false
   epoch_number: 150
-  epoch_snapshots: [10, 50, 100]
+  epoch_snapshots: [1, 10, 50, 100, 150]
   learning_rate: 0.005
+  linear_regions: {n_grid: 400, type: activation_code_short} # types: gradient, activation_code, activation_code_short
   loss:
     type: MSE
     t_correct: 1.0

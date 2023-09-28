@@ -7,6 +7,7 @@ import yaml
 
 import utils, losses
 from net import Net
+import linear_regions
 
 torch.set_default_dtype(torch.float64)
 
@@ -39,7 +40,7 @@ def validation_step(net, criterion, loader, device, return_input=False):
         for j, data in enumerate(loader):
             inputs, labels = data
             input_times = utils.to_device(inputs.clone().type(torch.float64), device)
-            outputs, _ = net(input_times)
+            outputs, _ = net(input_times)[0]
             selected_classes = criterion.select_classes(outputs)
             num_correct += len(outputs[selected_classes == labels])
             num_shown += len(labels)
@@ -174,6 +175,7 @@ def save_data(dirname, filename, net, all_parameters, train_losses, train_accura
     np.save(dirname + filename + '_spike_percentages.npy', spike_percentages)
     return
 
+
 def save_loss_plot(training_progress, trainloader, path=None, spike_percentages=None, start_epoch=0):
     save_path = 'live_accuracy.png'
     if start_epoch != 0:
@@ -205,9 +207,98 @@ def save_loss_plot(training_progress, trainloader, path=None, spike_percentages=
         ax2.set_ylim(0.45, 1.05)
     fig.legend(framealpha=1, loc="upper center")
     
-    fig.savefig(save_path)
+    fig.savefig(save_path, dpi=300)
     print("===========Saved live accuracy plot")
     plt.close(fig)
+
+
+def save_linear_region_plot(data, counting_scheme, criterion, path=None):
+    save_path = 'linear_regions.png'
+    if path:
+        save_path = os.path.join(path, save_path)
+    if counting_scheme == 'gradient':
+        label_times, grads = data
+        n_classes = grads.shape[0]
+        n_directions = 2 # derivative wrt x and y
+        direction_labels = {0: "x", 1: "y"}
+        class_labels = {i: f"class {i+1}" for i in range(n_classes)}
+        n_grid = grads[0,0].shape[0]
+        xs = np.linspace(0, 1, num=n_grid+1)
+        fig, ax = plt.subplots(n_directions+1, n_classes+1)
+        
+        # print the non-differentiated spike times
+        for i in range(n_classes):
+            grid = label_times[i]
+            ax[0,i].pcolormesh(xs, xs, grid.cpu().numpy())
+            # ax[0,i].contour(
+            #     xs, xs, grid.cpu().numpy(),
+            #     levels=[criterion.t_correct, criterion.t_wrong],
+            #     colors=['red', 'purple'], 
+            #     linewidths=0.5)
+            ax[0,i].set_aspect(1)
+            ax[0,i].set_xticks([0,0.5,1])
+            ax[0,i].set_yticks([0,0.5,1])
+            # ax[i,j].set_xlabel("x")
+            # ax[i,j].set_ylabel("y")
+            ax[0,i].set_title(f"{class_labels[i]}")
+            # plot contours at correct and false time
+        
+        # print the class decisions
+        classes = criterion.select_classes(label_times.permute(1,2,0).view(n_grid*n_grid, n_classes)).view(n_grid, n_grid)
+        ax[0,3].pcolormesh(xs, xs, classes.cpu().numpy())
+        # also plot the data manifold
+        circle = plt.Circle((0.5, 0.5), 0.5, color='r', fill=False, linestyle='dashed')
+        ax[0,3].add_patch(circle)
+        ax[0,3].set_aspect(1)
+        ax[0,3].set_xticks([0,0.5,1])
+        ax[0,3].set_yticks([0,0.5,1])
+        # ax[i,j].set_xlabel("x")
+        # ax[i,j].set_ylabel("y")
+        ax[0,3].set_title(f"class decision")
+        
+        # print the gradients for each class
+        for i in range(n_classes):
+            for j in range(2):
+                grid = grads[i,j]
+                ax[1+j,i].pcolormesh(xs, xs, grid.cpu().numpy())
+                ax[1+j,i].set_aspect(1)
+                ax[1+j,i].set_xticks([0,0.5,1])
+                ax[1+j,i].set_yticks([0,0.5,1])
+                # ax[i,j].set_xlabel("x")
+                # ax[i,j].set_ylabel("y")
+                ax[1+j,i].set_title(f"{class_labels[i]} wrt {direction_labels[j]}")
+
+        # print gradients summed over classes for an overall picture of linear regions
+        for j in range(2):
+            grid = grads[:,j].sum(dim=0)
+            ax[1+j,3].pcolormesh(xs, xs, grid.cpu().numpy())
+            ax[1+j,3].set_aspect(1)
+            ax[1+j,3].set_xticks([0,0.5,1])
+            ax[1+j,3].set_yticks([0,0.5,1])
+            # ax[i,j].set_xlabel("x")
+            # ax[i,j].set_ylabel("y")
+            ax[1+j,3].set_title(f"sum wrt {direction_labels[j]}")
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=300)
+        print("===========Saved linear region plot")
+        plt.close(fig)
+
+    elif counting_scheme == 'activation_code':
+        grid = data.cpu().numpy()
+        fig, ax = plt.subplots(1, 1)
+        n_grid = grid.shape[0]
+        #ax.imshow(grid) # pcolormesh also allows defining the x and y coordinates
+        xs = np.linspace(0, 1, num=n_grid+1)
+        ax.pcolormesh(xs, xs, grid)
+        ax.set_aspect(1)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        # also plot the data manifold
+        circle = plt.Circle((0.5, 0.5), 0.5, color='r', fill=False, linestyle='dashed')
+        ax.add_patch(circle)
+        fig.savefig(save_path, dpi=300)
+        print("===========Saved linear region plot")
+        plt.close(fig)
 
 
 def save_result_spikes(dirname, filename, train_times, train_labels, train_inputs,
@@ -251,6 +342,21 @@ def save_optim_state(dirname, filename, optimizer, scheduler, np_rand_state, tor
                   }
     with open(dirname + filename + '_numpy_rand_state.yaml', 'w') as f:
         yaml.dump([numpy_dict], f)
+    return
+
+
+def save_linear_region_grid(dirname, filename, data, counting_scheme, epoch):
+    if (dirname is None) or (filename is None):
+        return
+    dirname = osp.join('../experiment_results', dirname, 'epoch_{}/'.format(epoch))
+    if counting_scheme in ['activation_code', 'activation_code_short']:
+        full, encoded = data
+        np.save(dirname + filename + '_activations.npy', full)
+        np.save(dirname + filename + '_activation_code.npy', encoded)
+    elif counting_scheme == 'gradient':
+        label_times, grads = data
+        np.save(dirname + filename + '_output_times.npy', label_times)
+        np.save(dirname + filename + '_gradients.npy', grads)
     return
 
 
@@ -341,14 +447,14 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             # zero the parameter gradients
             optimizer.zero_grad()
             # forward pass
-            import time 
-            start = time.time()
-            label_times, hidden_times = net(input_times)
-            stop = time.time()
-            #print(f'eval of net: {(stop-start)*1000:.1f}')
-            eval_times.append((stop-start)*1000)
-            #print(f'mean eval time: {sum(eval_times)/len(eval_times):.2f}ms')
-            #print(f'n eval times: {len(eval_times):4}')
+            # import time 
+            # start = time.time()
+            label_times, hidden_times = net(input_times)[0]
+            # stop = time.time()
+            # print(f'eval of net: {(stop-start)*1000:.1f}')
+            # eval_times.append((stop-start)*1000)
+            # print(f'mean eval time: {sum(eval_times)/len(eval_times):.2f}ms')
+            # print(f'n eval times: {len(eval_times):4}')
             output_percentage, hidden_percentages = net.spike_percentages(label_times, hidden_times)
             selected_classes = criterion.select_classes(label_times)
             # Either do the backward pass or bump weights because spikes are missing
@@ -372,8 +478,8 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
 
 
             if j % 100 == 0:
-                [print(f'ratio of hidden spikes in layer {i}: {hidden_percentages[-i]:.3f}') for i in range(1,net.n_layers)]
-                print(f'ratio of output spikes in layer {net.n_layers}: {output_percentage:.3f}')
+                # [print(f'ratio of hidden spikes in layer {i}: {hidden_percentages[-i]:.3f}') for i in range(1,net.n_layers)]
+                # print(f'ratio of output spikes in layer {net.n_layers}: {output_percentage:.3f}')
                 if live_plot:
                     save_loss_plot(tmp_training_progress, trainloader, spike_percentages=spike_percentages, start_epoch=start_epoch)
 
@@ -629,6 +735,30 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         torch_rand_state = torch.get_rng_state()
         save_optim_state(foldername, filename, optimizer, scheduler, numpy_rand_state,
                          torch_rand_state, epoch_dir=(True, e_end))
+        
+        # possibility to evaluate linear regions
+        if training_params.get('linear_regions'):
+            with torch.no_grad():
+                n_grid = training_params['linear_regions']['n_grid']
+                counting_scheme = training_params['linear_regions']['type']
+                # evaluation of spiking neurons on grid
+                # linear regions are either identified within the gradient or by looking at which neurons are active
+                if counting_scheme in ['activation_code', 'activation_code_short']:
+                    short = counting_scheme == 'activation_code_short' # just consider the length of the encoding string as a coarser measure of linear regions
+                    full, encoded = linear_regions.activation_code(net, n_grid, device, short=short)
+                    save_linear_region_grid(foldername, filename, (full, encoded), counting_scheme, epoch=e_end)
+                    if foldername:
+                        linear_regions_plot_path = osp.join('../experiment_results', foldername, 'epoch_{}/'.format(e_end))
+                        save_linear_region_plot(encoded, 'activation_code', criterion, path=linear_regions_plot_path)
+                elif counting_scheme == 'gradient':
+                    label_times, grads = linear_regions.gradient(net, n_grid, device)
+                    save_linear_region_grid(foldername, filename, (label_times, grads), counting_scheme, epoch=e_end)
+                    if foldername:
+                        linear_regions_plot_path = osp.join('../experiment_results', foldername, 'epoch_{}/'.format(e_end))
+                        save_linear_region_plot((label_times, grads), 'gradient', criterion, path=linear_regions_plot_path)
+                else:
+                    raise NotImplementedError(f"linear region counting scheme {training_params['linear_regions']['type']} not implemented")
+            
     print("Training finished")
     print('####################')
     print('Test accuracy: {}'.format(test_accuracy))
@@ -831,6 +961,28 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
 
         # each savepoint needs config to be able to run inference for eval
         save_config(dirname, filename, neuron_params, network_layout, training_params, epoch_dir=(True, e_end))
+
+        # possibility to evaluate linear regions
+        if training_params.get('linear_regions'):
+            n_grid = training_params['linear_regions']['n_grid']
+            counting_scheme = training_params['linear_regions']['type']
+            if counting_scheme == 'activation_code':
+                # evaluation of spiking neurons on grid
+                full, encoded = linear_regions.activation_code(net, n_grid, device)
+                save_linear_region_grid(dirname, filename, (full, encoded), counting_scheme, epoch=e_end)
+                if dirname:
+                    linear_regions_plot_path = osp.join('../experiment_results', dirname, 'epoch_{}/'.format(e_end))
+                    save_linear_region_plot(encoded, 'activation_code', criterion, path=linear_regions_plot_path)
+            elif counting_scheme == 'gradient':
+                # evaluation of gradients on grid
+                label_times, grads = linear_regions.gradient(net, n_grid, device)
+                save_linear_region_grid(dirname, filename, (label_times, grads), counting_scheme, epoch=e_end)
+                if dirname:
+                    linear_regions_plot_path = osp.join('../experiment_results', dirname, 'epoch_{}/'.format(e_end))
+                    save_linear_region_plot((label_times, grads), 'gradient', criterion, path=linear_regions_plot_path)
+            else:
+                raise NotImplementedError(f"linear region counting scheme {training_params['linear_regions']['type']} not implemented")
+
         numpy_rand_state = np.random.get_state()
         torch_rand_state = torch.get_rng_state()
         save_optim_state(dirname, filename, optimizer, scheduler, numpy_rand_state,
