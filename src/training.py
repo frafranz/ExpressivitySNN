@@ -6,7 +6,8 @@ import torch
 import yaml
 
 import utils, losses
-from net import Net
+from networks.spiking_network import SpikingNet
+from networks.relu_network import ReLUNet
 
 torch.set_default_dtype(torch.float64)
 
@@ -16,9 +17,13 @@ def running_mean(x, N=30):
     return (cumsum[N:] - cumsum[:-N]) / float(N) # we subtract two parts of the array with a relative shift of N, output has shape of x - N
 
 
-def load_data(dirname, filename, dataname):
-    path = dirname + '/' + filename + dataname
-    data = np.load(path, allow_pickle=True)
+def load_data(dirname, filename, dataname, alternative_dataname=None):
+    try:
+        path = dirname + '/' + filename + dataname
+        data = np.load(path, allow_pickle=True)
+    except FileNotFoundError: # compatibility layer for previous naming convention of parameter files
+        path = dirname + '/' + filename + alternative_dataname
+        data = np.load(path, allow_pickle=True)
     return data
 
 
@@ -98,11 +103,11 @@ def check_bump_weights(net, hidden_times, label_times, training_params, epoch, b
         if training_params['weight_bumping_targeted']:
             # make bool and then int to have either zero or ones
             should_bump = non_spikes.sum(axis=0).bool().int()
-            n_in = net.layers[i].weights.data.size()[0]
+            n_in = net.layers[i].weight.data.size()[0]
             bumps = should_bump.repeat(n_in, 1) * bump_val
-            net.layers[i].weights.data += bumps
+            net.layers[i].weight.data += bumps
         else:
-            net.layers[i].weights.data += bump_val
+            net.layers[i].weight.data += bump_val
 
         # print("epoch {0}, batch {1}: missing {4} spikes, bumping weights by {2} (targeted_bump={3})".format(
         #     epoch, batch, bump_val, training_params['weight_bumping_targeted'],
@@ -145,7 +150,7 @@ def save_config(dirname, filename, neuron_params, network_layout, training_param
 
 
 def save_data(dirname, filename, net, all_parameters, train_losses, train_accuracies, val_losses, val_accuracies,
-              val_labels, mean_val_outputs_sorted, std_val_outputs_sorted, spike_percentages, epoch_dir=(False, -1)):
+              val_labels, mean_val_outputs_sorted, std_val_outputs_sorted, spike_percentages, training_params, epoch_dir=(False, -1)):
     if (dirname is None) or (filename is None):
         return
     dirname = '../experiment_results/' + dirname
@@ -162,8 +167,13 @@ def save_data(dirname, filename, net, all_parameters, train_losses, train_accura
     torch.save(net, dirname + filename + '_network.pt')
 
     # save training result
-    for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"]:
-        np.save(dirname + filename + '_{}_training.npy'.format(key), all_parameters[key])
+    [np.save(dirname + filename + f'_weights_{i}_training.npy', all_parameters[f'weights_{i}']) for i in range(net.n_layers)]
+    
+    if training_params.get("train_delay"):
+        [np.save(dirname + filename + f'_delays_{i}_training.npy', all_parameters[f'delays_{i}']) for i in range(net.n_layers)]
+    if training_params.get("train_thresholds"):
+        [np.save(dirname + filename + f'_thresholds_{i}_training.npy', all_parameters[f'thresholds_{i}']) for i in range(net.n_layers)]
+
     np.save(dirname + filename + '_train_losses.npy', train_losses)
     np.save(dirname + filename + '_train_accuracies.npy', train_accuracies)
     np.save(dirname + filename + '_val_losses.npy', val_losses)
@@ -317,8 +327,8 @@ def apply_noise(input_times, noise_params, device):
 def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, trainloader, valloader,
                num_classes, all_parameters, all_train_loss, all_validate_loss, std_validate_outputs_sorted,
                mean_validate_outputs_sorted, tmp_training_progress, all_validate_accuracy,
-               all_train_accuracy, weight_bumping_steps, spike_percentages, training_params, start_epoch=0):
-    bump_val = training_params['weight_bumping_value']
+               all_train_accuracy, weight_bumping_steps, spike_percentages, training_params, start_epoch=0, spiking=True):
+    bump_val = training_params.get('weight_bumping_value')
     last_weights_bumped = -2  # means no bumping happened last time
     last_learning_rate = 0  # for printing learning rate at beginning
     noisy_training = training_params.get('training_noise') not in (False, None)
@@ -349,13 +359,15 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             eval_times.append((stop-start)*1000)
             #print(f'mean eval time: {sum(eval_times)/len(eval_times):.2f}ms')
             #print(f'n eval times: {len(eval_times):4}')
-            output_percentage, hidden_percentages = net.spike_percentages(label_times, hidden_times)
+            if spiking:
+                output_percentage, hidden_percentages = net.spike_percentages(label_times, hidden_times)
             selected_classes = criterion.select_classes(label_times)
-            # Either do the backward pass or bump weights because spikes are missing
-            last_weights_bumped, bump_val = check_bump_weights(net, hidden_times, label_times,
-                                                               training_params, epoch, j, bump_val, last_weights_bumped)
             live_plot = True
-            if last_weights_bumped != -2:  # means bumping happened
+            # Either do the backward pass or bump weights because spikes are missing
+            if spiking:
+                last_weights_bumped, bump_val = check_bump_weights(net, hidden_times, label_times,
+                                                                training_params, epoch, j, bump_val, last_weights_bumped)
+            if spiking and last_weights_bumped != -2:  # means bumping happened
                 weight_bumping_steps.append(epoch * len(trainloader) + j)
             else:
                 loss = criterion(label_times, labels)
@@ -367,13 +379,15 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
             num_correct += len(label_times[selected_classes == labels])
             num_shown += len(labels)
             tmp_training_progress.append(len(label_times[selected_classes == labels]) / len(labels))
-            spike_percentages[0].append(output_percentage)
-            [spike_percentages[1+i].append(hidden_percentages[i]) for i in range(net.n_layers-1)]
+            if spiking:
+                spike_percentages[0].append(output_percentage)
+                [spike_percentages[1+i].append(hidden_percentages[i]) for i in range(net.n_layers-1)]
 
 
             if j % 100 == 0:
-                [print(f'ratio of hidden spikes in layer {i}: {hidden_percentages[-i]:.3f}') for i in range(1,net.n_layers)]
-                print(f'ratio of output spikes in layer {net.n_layers}: {output_percentage:.3f}')
+                if spiking:
+                    [print(f'ratio of hidden spikes in layer {i}: {hidden_percentages[-i]:.3f}') for i in range(1,net.n_layers)]
+                    print(f'ratio of output spikes in layer {net.n_layers}: {output_percentage:.3f}')
                 if live_plot:
                     save_loss_plot(tmp_training_progress, trainloader, spike_percentages=spike_percentages, start_epoch=start_epoch)
 
@@ -411,14 +425,11 @@ def run_epochs(e_start, e_end, net, criterion, optimizer, scheduler, device, tra
                 std_validate_outputs_sorted[i].append(std_times)
 
             all_validate_accuracy.append(validate_accuracy)
-            all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
-            [all_parameters["hidden_weights"].append(net.layers[-2-i].weights.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
-            if training_params["train_delay"]:
-                all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
-                [all_parameters["hidden_delays"].append(net.layers[-2-i].delays.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
-            if training_params["train_threshold"]:
-                all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
-                [all_parameters["hidden_thresholds"].append(net.layers[-2-i].thresholds.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
+            [all_parameters[f"weights_{i}"].append(net.layers[i].weight.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
+            if training_params.get("train_delay"):
+                [all_parameters[f"delays_{i}"].append(net.layers[i].delays.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
+            if training_params.get("train_threshold"):
+                [all_parameters[f"thresholds_{i}"].append(net.layers[i].thresholds.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
             all_validate_loss.append(validate_loss.data.cpu().detach().numpy())
 
         if (epoch % print_step) == 0:
@@ -477,7 +488,10 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         torch.cuda.manual_seed(training_params['torch_seed'])
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    if not isinstance(training_params['max_num_missing_spikes'], (list, tuple, np.ndarray)):
+
+    # decide whether a spiking network is used
+    spiking = neuron_params['activation'] != 'ReLU'
+    if spiking and not isinstance(training_params['max_num_missing_spikes'], (list, tuple, np.ndarray)):
         training_params['max_num_missing_spikes'] = [
             training_params['max_num_missing_spikes']] * network_layout['n_layers']
 
@@ -485,11 +499,11 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     save_config(foldername, filename, neuron_params, network_layout, training_params)
 
     # create sim params
-    sim_params = {k: training_params.get(k, False)
-                  for k in ['use_forward_integrator', 'resolution', 'sim_time',
-                            'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay', 'train_threshold', 'substitute_delay']
-                  }
+    sim_params = {k: training_params.get(k, False) for k in ['rounding_precision', 'max_dw_norm', 'clip_weights_max']}
+    if spiking:
+        sim_params.update({k: training_params.get(k, False)
+                    for k in ['use_forward_integrator', 'resolution', 'sim_time', 'train_delay', 'train_threshold', 'substitute_delay']
+                    })
     sim_params.update(neuron_params)
 
     print('training_params')
@@ -513,15 +527,23 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         dataset_test, batch_size=training_params.get('batch_size_eval', None), shuffle=False), device)
 
     print("generating network")
-    net = utils.to_device(
-        Net(network_layout, sim_params, device),
-        device)
+    if spiking:
+        net = utils.to_device(
+            SpikingNet(network_layout, sim_params, device),
+            device)
+    else:
+        net = utils.to_device(
+            ReLUNet(network_layout, sim_params),
+            device)
     save_untrained_network(foldername, filename, net)
 
     print("loss function")
-    criterion = losses.GetLoss(training_params, 
-                              network_layout['layer_sizes'][-1],
-                              sim_params['tau_syn'], device)
+    if spiking:
+        criterion = losses.GetLoss(training_params, 
+                                network_layout['layer_sizes'][-1],
+                                sim_params['tau_syn'], device)
+    else:
+        criterion = losses.GetLossForReLU(training_params, network_layout['layer_sizes'][-1], device)
 
     if training_params['optimizer'] == 'adam':
         optimizer = torch.optim.Adam(net.parameters(), lr=training_params['learning_rate'])
@@ -536,7 +558,11 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
 
     # evaluate on validation set before training
     num_classes = network_layout['layer_sizes'][-1]
-    all_parameters = {"label_weights": [], "hidden_weights": [], "label_delays": [], "hidden_delays": [], "label_thresholds": [], "hidden_thresholds": []}
+    all_parameters = {f"weights_{i}": [] for i in range(net.n_layers)}
+    if training_params.get("train_delay"):
+        all_parameters.update({f"delays_{i}": [] for i in range(net.n_layers)})
+    if training_params.get("train_thresholds"):
+        all_parameters.update({f"thresholds_{i}": [] for i in range(net.n_layers)})
     all_train_loss = []
     all_validate_loss = []
     std_validate_outputs_sorted = [[] for i in range(num_classes)]
@@ -565,14 +591,11 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         print('Initial validation accuracy: {:.3f}'.format(validate_accuracy))
         print('Initial validation loss: {:.3f}'.format(loss))
         all_validate_accuracy.append(validate_accuracy)
-        all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
-        [all_parameters["hidden_weights"].append(net.layers[-2-i].weights.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
-        if training_params["train_delay"]:
-            all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
-            [all_parameters["hidden_delays"].append(net.layers[-2-i].delays.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
-        if training_params["train_threshold"]:
-            all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
-            [all_parameters["hidden_thresholds"].append(net.layers[-2-i].thresholds.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
+        [all_parameters[f"weights_{i}"].append(net.layers[i].weight.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
+        if training_params.get("train_delay"):
+            [all_parameters[f"delays_{i}"].append(net.layers[i].delays.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
+        if training_params.get("train_threshold"):
+            [all_parameters[f"thresholds_{i}"].append(net.layers[i].thresholds.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
         all_validate_loss.append(loss.data.cpu().detach().numpy())
 
     print("training started")
@@ -591,7 +614,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
             mean_validate_outputs_sorted,
             tmp_training_progress, all_validate_accuracy,
             all_train_accuracy, weight_bumping_steps, 
-            spike_percentages, training_params)
+            spike_percentages, training_params, spiking=spiking)
         print('Ending training from epoch {0} to epoch {1}'.format(e_start, e_end))
         all_parameters = result_dict['all_parameters']
         all_train_loss = result_dict['all_train_loss']
@@ -606,7 +629,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         save_data(foldername, filename, net, all_parameters, all_train_loss,
                   all_train_accuracy, all_validate_loss, all_validate_accuracy,
                   validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted,
-                  spike_percentages, epoch_dir=(True, e_end))
+                  spike_percentages, training_params, epoch_dir=(True, e_end))
         # also save the loss curve in the results folder
         if foldername:
             loss_plot_path = osp.join('../experiment_results', foldername, 'epoch_{}/'.format(e_end))
@@ -620,8 +643,9 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
         loss, test_accuracy, test_outputs, test_labels, test_inputs = validation_step(
             net, criterion, loader_test, device, return_input=return_input)
 
-        save_result_spikes(foldername, filename, final_train_outputs, final_train_labels, final_train_inputs,
-                           test_outputs, test_labels, test_inputs, epoch_dir=(True, e_end))
+        if spiking:
+            save_result_spikes(foldername, filename, final_train_outputs, final_train_labels, final_train_inputs,
+                            test_outputs, test_labels, test_inputs, epoch_dir=(True, e_end))
 
         # each savepoint needs config to be able to run inference for eval
         save_config(foldername, filename, neuron_params, network_layout, training_params, epoch_dir=(True, e_end))
@@ -635,7 +659,8 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
 
     save_data(foldername, filename, net, all_parameters, all_train_loss,
               all_train_accuracy, all_validate_loss, all_validate_accuracy,
-              validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted, spike_percentages)
+              validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted, 
+              spike_percentages, training_params)
 
     # also save the loss curve in the results folder
     if foldername:
@@ -671,15 +696,41 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         np.random.seed(training_params['numpy_seed'])
     weight_bumping_steps = []
     tmp_training_progress = []
+    # decide whether a spiking network is used
+    spiking = neuron_params['activation'] != 'ReLU'
+    
     spike_percentages = [list(elem) for elem in load_data(dirname_long, filename, '_spike_percentages.npy')]
     all_train_loss = list(load_data(dirname_long, filename, '_train_losses.npy'))
     all_train_accuracy = list(load_data(dirname_long, filename, '_train_accuracies.npy'))
     all_validate_loss = list(load_data(dirname_long, filename, '_val_losses.npy'))
     all_validate_accuracy = list(load_data(dirname_long, filename, '_val_accuracies.npy'))
+    
     all_parameters = {
-        key: [list(elem) for elem in load_data(dirname_long, filename, '_{}_training.npy'.format(key))] \
-            for key in ["label_weights", "hidden_weights", "label_delays", "hidden_delays", "label_thresholds", "hidden_thresholds"] 
+        "weights_0": [list(elem) for elem in load_data(dirname_long, filename, '_weights_0_training.npy', '_hidden_weights_training.npy')],
+        "weights_1": [list(elem) for elem in load_data(dirname_long, filename, '_weights_1_training.npy', '_label_weights_training.npy')],
     }
+    all_parameters.update(
+        {f"weights_{i}": [list(elem) for elem in load_data(dirname_long, filename, f'_weights_{i}_training.npy')] for i in range(2, network_layout['n_layers'])
+    })
+
+    if training_params.get('train_delay'):
+        all_parameters.update({
+            "delays_0": [list(elem) for elem in load_data(dirname_long, filename, '_delays_0_training.npy', '_hidden_delays_training.npy')],
+            "delays_1": [list(elem) for elem in load_data(dirname_long, filename, '_delays_1_training.npy', '_label_delays_training.npy')],
+        })
+        all_parameters.update({
+            f"delays_{i}": [list(elem) for elem in load_data(dirname_long, filename, f'_delays_{i}_training.npy')] for i in range(2, network_layout['n_layers'])
+        })
+        
+    if training_params.get('train_threshold'):
+        all_parameters.update({
+            "thresholds_0": [list(elem) for elem in load_data(dirname_long, filename, '_thresholds_0_training.npy', '_hidden_thresholds_training.npy')],
+            "thresholds_1": [list(elem) for elem in load_data(dirname_long, filename, '_thresholds_1_training.npy', '_label_thresholds_training.npy')],
+        })
+        all_parameters.update({
+            f"thresholds_{i}": [list(elem) for elem in load_data(dirname_long, filename, f'_thresholds_{i}_training.npy')] for i in range(2, network_layout['n_layers'])
+        })
+    
     mean_validate_outputs_sorted = [list(elem) for elem in load_data(dirname_long, filename, '_mean_val_outputs_sorted.npy')]
     std_validate_outputs_sorted = [list(elem) for elem in load_data(dirname_long, filename, '_std_val_outputs_sorted.npy')]
 
@@ -694,16 +745,18 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    if not isinstance(training_params['max_num_missing_spikes'], (list, tuple, np.ndarray)):
-        training_params['max_num_missing_spikes'] = [
-            training_params['max_num_missing_spikes']] * network_layout['n_layers']
+    if spiking:
+        if not isinstance(training_params['max_num_missing_spikes'], (list, tuple, np.ndarray)):
+            training_params['max_num_missing_spikes'] = [
+                training_params['max_num_missing_spikes']] * network_layout['n_layers']
 
     # create sim params
-    sim_params = {k: training_params.get(k, False)
+    sim_params = {k: training_params.get(k, False) for k in ['rounding_precision', 'max_dw_norm','clip_weights_max']}
+    if spiking:
+        sim_params.update({k: training_params.get(k, False)
                   for k in ['use_forward_integrator', 'resolution', 'sim_time',
-                            'rounding_precision', 'max_dw_norm',
-                            'clip_weights_max', 'train_delay', 'train_threshold', 'substitute_delay']
-                  }
+                            'train_delay', 'train_threshold', 'substitute_delay']
+                  })
     sim_params.update(neuron_params)
 
     print('training_params')
@@ -732,9 +785,13 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         return net
 
     print("loading optimizer and scheduler")
-    criterion = losses.GetLoss(training_params,
-                              network_layout['layer_sizes'][-1],
-                              sim_params['tau_syn'], device)
+    if spiking:
+        criterion = losses.GetLoss(training_params, 
+                                network_layout['layer_sizes'][-1],
+                                sim_params['tau_syn'], device)
+    else:
+        criterion = losses.GetLossForReLU(training_params, network_layout['layer_sizes'][-1], device)
+
     optimizer, scheduler, torch_rand_state, numpy_rand_state = load_optim_state(
         dirname_long, filename, net, training_params)
 
@@ -760,14 +817,11 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         print('Initial validation accuracy: {:.3f}'.format(validate_accuracy))
         print('Initial validation loss: {:.3f}'.format(loss))
         all_validate_accuracy.append(validate_accuracy)
-        all_parameters["label_weights"].append(net.layers[-1].weights.data.cpu().detach().numpy().copy())
-        [all_parameters["hidden_weights"].append(net.layers[-2-i].weights.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
-        if training_params["train_delay"]:
-            all_parameters["label_delays"].append(net.layers[-1].delays.data.cpu().detach().numpy().copy())
-            [all_parameters["hidden_delays"].append(net.layers[-2-i].delays.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
-        if training_params["train_threshold"]:
-            all_parameters["label_thresholds"].append(net.layers[-1].thresholds.data.cpu().detach().numpy().copy())
-            [all_parameters["hidden_thresholds"].append(net.layers[-2-i].thresholds.data.cpu().detach().numpy().copy()) for i in range(net.n_layers-1)]
+        [all_parameters[f"weights_{i}"].append(net.layers[i].weight.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
+        if training_params.get("train_delay"):
+            [all_parameters[f"delays_{i}"].append(net.layers[i].delays.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
+        if training_params.get("train_threshold"):
+            [all_parameters[f"thresholds_{i}"].append(net.layers[i].thresholds.data.cpu().detach().numpy().copy()) for i in range(net.n_layers)]
         all_validate_loss.append(loss.data.cpu().detach().numpy())
 
     # only seed after initial validation run
@@ -796,7 +850,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
             tmp_training_progress, all_validate_accuracy,
             all_train_accuracy, weight_bumping_steps,
             spike_percentages, training_params,
-            start_epoch=start_epoch)
+            start_epoch=start_epoch, spiking=spiking)
         print('Ending training from epoch {0} to epoch {1}'.format(e_start, e_end))
         all_parameters = result_dict['all_parameters']
         all_train_loss = result_dict['all_train_loss']
@@ -811,7 +865,7 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         save_data(dirname, filename, net, all_parameters, all_train_loss,
                   all_train_accuracy, all_validate_loss, all_validate_accuracy,
                   validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted,
-                  spike_percentages, epoch_dir=(True, e_end))
+                  spike_percentages, training_params, epoch_dir=(True, e_end))
 
         # also save the loss curve in the results folder
         if dirname:
@@ -826,8 +880,9 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
         loss, test_accuracy, test_outputs, test_labels, test_inputs = validation_step(
             net, criterion, loader_test, device, return_input=return_input)
 
-        save_result_spikes(dirname, filename, final_train_outputs, final_train_labels, final_train_inputs,
-                           test_outputs, test_labels, test_inputs, epoch_dir=(True, e_end))
+        if spiking:
+            save_result_spikes(dirname, filename, final_train_outputs, final_train_labels, final_train_inputs,
+                               test_outputs, test_labels, test_inputs, epoch_dir=(True, e_end))
 
         # each savepoint needs config to be able to run inference for eval
         save_config(dirname, filename, neuron_params, network_layout, training_params, epoch_dir=(True, e_end))
@@ -842,7 +897,8 @@ def continue_training(dirname, filename, start_epoch, savepoints, dataset_train,
 
     save_data(dirname, filename, net, all_parameters, all_train_loss,
               all_train_accuracy, all_validate_loss, all_validate_accuracy,
-              validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted, spike_percentages)
+              validate_labels, mean_validate_outputs_sorted, std_validate_outputs_sorted, 
+              spike_percentages, training_params)
 
     # also save the loss curve in the results folder
     if dirname:

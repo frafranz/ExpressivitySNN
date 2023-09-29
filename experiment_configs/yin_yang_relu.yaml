@@ -1,0 +1,30 @@
+dataset: yin_yang
+neuron_params:
+  activation: ReLU
+network_layout:
+  bias: [True, True]
+  layer_sizes: [120, 3]
+  n_inputs: 4
+  n_layers: 2
+  initialization: He
+training_params:
+  batch_size: 150
+  batch_size_eval: 200
+  enforce_cpu: true
+  enforce_mps: false
+  epoch_number: 150
+  epoch_snapshots: [10, 50, 100]
+  learning_rate: 0.005
+  loss:
+    #type: CE
+    type: MSE
+    t_correct: 1.0
+    t_wrong: 1.7
+  lr_scheduler: {gamma: 0.95, step_size: 20, type: StepLR}
+  max_dw_norm: 0.2
+  momentum: 0
+  numpy_seed: 12345
+  optimizer: adam
+  print_step_percent: 5.0
+  torch_seed: 2000
+  training_noise: false

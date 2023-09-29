@@ -5,7 +5,7 @@ from utils import to_device
 from spiking_layer import SpikingLayer
 
 
-class Net(torch.nn.Module):
+class SpikingNet(torch.nn.Module):
     """
     Spiking Neural Network model
 
@@ -20,7 +20,7 @@ class Net(torch.nn.Module):
             sim_params: simulation parameters, e.g. for rounding
             device: the device to operate on
         """
-        super(Net, self).__init__()
+        super().__init__()
         self.n_inputs = network_layout['n_inputs']
         self.n_layers = network_layout['n_layers']
         self.layer_sizes = network_layout['layer_sizes']
@@ -89,8 +89,8 @@ class Net(torch.nn.Module):
         if self.rounding:
             float_weights = []
             for layer in self.layers:
-                float_weights.append(layer.weights.data)
-                layer.weights.data = self.round_weights(layer.weights.data, self.rounding_precision)
+                float_weights.append(layer.weight.data)
+                layer.weight.data = self.round_weights(layer.weight.data, self.rounding_precision)
 
         # below, the actual pass through the layers of the network is defined, including the bias terms
         hidden_times = []
@@ -110,7 +110,7 @@ class Net(torch.nn.Module):
 
         if self.rounding:
             for layer, floats in zip(self.layers, float_weights):
-                layer.weights.data = floats
+                layer.weight.data = floats
 
         return return_value
 
@@ -145,6 +145,6 @@ class Net(torch.nn.Module):
         if self.sim_params['clip_weights_max']:
             for i, layer in enumerate(self.layers):
                 maxweight = self.sim_params['clip_weights_max']
-                self.layers[i].weights.data = torch.clamp(layer.weights.data, -maxweight, maxweight)
+                self.layers[i].weight.data = torch.clamp(layer.weight.data, -maxweight, maxweight)
         return
     

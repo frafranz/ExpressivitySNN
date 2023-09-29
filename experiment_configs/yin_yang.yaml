@@ -10,21 +10,21 @@ neuron_params:
 network_layout:
   bias_times: [0.9]
   # delay_means : [0.1, 0.1]
-  delay_means: [-2.3, -2.3]
+  delay_means: [-2.3, -2.3, -2.3]
   # delay_means: [-10., -10.]
   # delay_means: [0.0, 0.0]
   # delay_stdevs: [0.01, 0.01]
-  delay_stdevs: [0.5, 0.5]
+  delay_stdevs: [0.5, 0.5, 0.5]
   # delay_stdevs: [0.0, 0.0]
-  threshold_means : [1., 1.]
+  threshold_means : [1., 1., 1.]
   # threshold_stdevs: [0.1, 0.1]
-  threshold_stdevs: [0., 0.]
-  layer_sizes: [120, 3]
-  n_biases: [1, 1]
+  threshold_stdevs: [0., 0., 0.]
+  layer_sizes: [10, 13, 3]
+  n_biases: [1, 1, 1]
   n_inputs: 4
-  n_layers: 2
-  weight_means: [1.5, 0.5]
-  weight_stdevs: [0.8, 0.8]
+  n_layers: 3
+  weight_means: [1.5, 0.5, 0.5]
+  weight_stdevs: [0.8, 0.8, 0.8]
 training_params:
   batch_size: 150
   batch_size_eval: 200
@@ -35,8 +35,8 @@ training_params:
   learning_rate: 0.005
   loss:
     type: MSE
-    t_correct: 1.0
-    t_wrong: 1.7
+    t_correct: 1.5
+    t_wrong: 2.5
     # type: TTFS
     # alpha: 0.0
     # beta: 1

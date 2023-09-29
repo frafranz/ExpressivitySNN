@@ -37,15 +37,15 @@ class SpikingLayer(torch.nn.Module):
             if self.sim_params.get('delta'):
                 self.sim_params['delta_in_steps'] = int(np.ceil(sim_params['delta'] / sim_params['resolution']))
                 
-        self.weights = torch.nn.Parameter(torch.Tensor(input_features + bias, output_features))
+        self.weight = torch.nn.Parameter(torch.Tensor(input_features + bias, output_features))
         self.delays = torch.nn.Parameter(torch.Tensor(input_features + bias, output_features))
         self.thresholds = torch.nn.Parameter(torch.Tensor(output_features))
 
         if isinstance(weights_init, tuple):
-            self.weights.data.normal_(weights_init[0], weights_init[1])
+            self.weight.data.normal_(weights_init[0], weights_init[1])
         else:
             assert weights_init.shape == (input_features + bias, output_features)
-            self.weights.data = weights_init
+            self.weight.data = weights_init
         
         if isinstance(delays_init, tuple):
             if self.sim_params.get('substitute_delay'):
@@ -76,10 +76,10 @@ class SpikingLayer(torch.nn.Module):
             the outgoing spike times from this layer
         """
         if self.use_forward_integrator:
-            return TimeDiscretized.apply(input_times, self.weights, self.delays, self.thresholds,
+            return TimeDiscretized.apply(input_times, self.weight, self.delays, self.thresholds,
                                                      self.sim_params,
                                                      self.device)
         else:
-            return Explicit.apply(input_times, self.weights, self.delays, self.thresholds,
+            return Explicit.apply(input_times, self.weight, self.delays, self.thresholds,
                                                      self.sim_params,
                                                      self.device)
