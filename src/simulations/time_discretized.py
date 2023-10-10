@@ -26,6 +26,7 @@ class TimeDiscretized(BaseSimulation):
 
         Returns:
             output_spikes:  outgoing spike times
+            None: (could return spike contributions here)
         """
         
         n_batch, n_postsyn, delayed_input_spikes = BaseSimulation.prepare_inputs(input_spikes, input_weights, input_delays, thresholds, sim_params)
@@ -223,4 +224,4 @@ class TimeDiscretized(BaseSimulation):
         # stop = time.time()
         # print("fifth: ", (stop-start)*1000) # <1ms, only save parameters
             
-        return output_spikes
+        return output_spikes, None

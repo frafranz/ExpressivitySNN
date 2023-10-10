@@ -40,7 +40,7 @@ class LossFunction(torch.nn.Module):
 
 
 class LossFunctionMSE(torch.nn.Module):
-    """Standard mean squared error loss function"""
+    """Mean squared error loss function for spike times"""
     def __init__(self, number_labels, tau_syn, correct, wrong, device):
         super().__init__()
         self.number_labels = number_labels
@@ -68,6 +68,41 @@ class LossFunctionMSE(torch.nn.Module):
         closest_to_target[nan_mask] = -1
         closest_to_target[inf_mask] = -1
         return closest_to_target
+    
+
+class LossFunctionMSEforReLU(torch.nn.Module):
+    """Standard mean squared error loss function"""
+    def __init__(self, number_labels, correct, wrong, device):
+        super().__init__()
+        self.number_labels = number_labels
+        self.device = device
+
+        self.t_correct = correct
+        self.t_wrong = wrong
+        return
+
+    def forward(self, labels, true_label):
+        # get a vector which is 1 at the true label and set to t_correct at the true label and to t_wrong at the others
+        target = to_device(torch.eye(self.number_labels), self.device)[true_label.long()] * (self.t_correct - self.t_wrong) + self.t_wrong
+        loss = 1. / 2. * (labels - target)**2
+        return loss.mean()
+
+    def select_classes(self, outputs):
+        closest_to_target = torch.abs(outputs - self.t_correct).argmin(1)
+        ctt_reshaped = closest_to_target.view(-1, 1)
+        return closest_to_target
+    
+class LossFunctionCrossEntropy(torch.nn.CrossEntropyLoss):
+    """Cross entropy loss as defined in torch, just added a function for selecting classes"""
+    def __init__(self):
+        super().__init__()
+    
+    def select_classes(self, outputs):
+        highest_value, classes = torch.max(outputs, dim=1)
+        # return -1 if there is no unique highest value
+        frequency_of_highest_value = (outputs==highest_value.unsqueeze(1)).sum(dim=1)
+        classes[frequency_of_highest_value>1] = -1
+        return classes
 
 
 def GetLoss(training_params, number_labels, tau_syn, device):
@@ -99,5 +134,30 @@ def GetLoss(training_params, number_labels, tau_syn, device):
         return LossFunctionMSE(number_labels, tau_syn,
                                params['t_correct'], params['t_wrong'],
                                device)
+    else:
+        raise NotImplementedError(f"loss of type '{params['type']}' not implemented")
+
+
+def GetLossForReLU(training_params, number_labels, device):
+    """Dynamically get the loss function for a ReLU network
+    
+    Parameters:
+        training_params: parameters of the experiment, which contain the ones concerning loss
+        number_labels: number of predictable classes
+        device: the device to operate on
+
+    Returns:
+        the selected loss function
+    """
+    if 'loss' in training_params:
+        params = training_params['loss']
+    else:
+        params = {
+            'type': 'CE'
+        }
+    if params['type'] == 'CE':
+        return LossFunctionCrossEntropy()
+    elif params['type'] == 'MSE':
+        return LossFunctionMSEforReLU(number_labels, params['t_correct'], params['t_wrong'], device)
     else:
         raise NotImplementedError(f"loss of type '{params['type']}' not implemented")

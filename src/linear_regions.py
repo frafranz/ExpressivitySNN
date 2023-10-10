@@ -1,5 +1,8 @@
 import torch
 
+from networks.relu_network import ReLUNet
+from networks.spiking_network import SpikingNet
+
 
 def gradient(net, n_grid, device):
     """Evaluate the net on a regular grid and return gradients"""
@@ -45,7 +48,11 @@ def activation_code(net, n_grid, device, short=False):
     spiketimes, contributions = net(inputs)
     # label_times, hidden_times = spiketimes
     # full, encoded = spikes_to_sparse_code(label_times, hidden_times)
-    full, encoded = sparse_code_causal_sets(net, contributions, short=short)
+    # use causality encoding for spiking nets and activation encoding for other (ReLU) nets
+    if isinstance(net, SpikingNet):
+        full, encoded = sparse_code_causal_sets(net, contributions, short=short)
+    else:
+        full, encoded = sparse_code_activations(net, contributions, short=short)
     width = full.shape[1]
     full = full.view(n_grid, n_grid, width)
     encoded = encoded.view(n_grid, n_grid)
@@ -96,7 +103,7 @@ def sparse_code_causal_sets(net, contributions, short=False):
     
     # additional masking required: contributions to spikes which do not lead to outgoing spikes
     # this is done by moving backwards through the layers
-    print("before: ", torch.hstack([con.reshape(n_data, -1) for con in contributions_by_layer]).float().mean().data)
+    # print("before: ", torch.hstack([con.reshape(n_data, -1) for con in contributions_by_layer]).float().mean().data)
 
     for i in range(1, len(contributions_by_layer)):
         # sum over all outputs to see which inputs are relevant
@@ -107,7 +114,7 @@ def sparse_code_causal_sets(net, contributions, short=False):
         # in the previous layer, only consider the contributions to these relevant outputs
         contributions_by_layer[-i-1] *= relevant_inputs_without_bias.unsqueeze(1)
     
-    print("after: ", torch.hstack([con.reshape(n_data, -1) for con in contributions_by_layer]).float().mean().data)
+    # print("after: ", torch.hstack([con.reshape(n_data, -1) for con in contributions_by_layer]).float().mean().data)
 
     # determine for each neuron which incoming spikes contribute (empty set if it never spikes)
     contributions_flattened = torch.hstack([con.reshape(n_data, -1) for con in contributions_by_layer])
@@ -131,3 +138,30 @@ def sparse_code_causal_sets(net, contributions, short=False):
             contributions_as_strings.append(configuration_dict[contribution_string])
     print(f"Found {len(set(contributions_as_strings))} linear regions")
     return contributions_flattened, torch.tensor(contributions_as_strings)
+
+def sparse_code_activations(net, activations, short=False):
+    """Encode the activations of the net
+    
+    This is especially suited for a ReLU net, where the arrangement of activations is sufficient to determine a linear region.
+    """
+    n_data = activations[0].shape[0]
+    activations_by_layer = list(activations[1]) + [activations[0]]
+    activations_flattened = torch.hstack([con.reshape(n_data, -1) for con in activations_by_layer])
+    
+    # encode configurations as strings, using sparsity: encode only the indices of activated neurons
+    configuration_dict = {} 
+    n_string = 0
+    activations_as_strings = []
+    for activation_vector in activations_flattened:
+        # for each grid point, get indices where there is a activation
+        activation_indices = activation_vector.nonzero()
+        activation_string = "".join([str(c.item()) for c in activation_indices])
+        if short:
+            activations_as_strings.append(len(activation_string)) # compare the lengths of the encoding strings rather than the strings themselves
+        else:
+            if activation_string not in configuration_dict:
+                configuration_dict[activation_string] = n_string
+                n_string += 1
+            activations_as_strings.append(configuration_dict[activation_string])
+    print(f"Found {len(set(activations_as_strings))} linear regions")
+    return activations_flattened, torch.tensor(activations_as_strings)

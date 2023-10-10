@@ -34,7 +34,7 @@ training_params:
   epoch_number: 150
   epoch_snapshots: [1, 10, 50, 100, 150]
   learning_rate: 0.005
-  linear_regions: {n_grid: 400, type: activation_code_short} # types: gradient, activation_code, activation_code_short
+  linear_regions: {n_grid: 400, type: activation_code} # types: gradient, activation_code, activation_code_short
   loss:
     type: MSE
     t_correct: 1.0
