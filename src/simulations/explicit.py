@@ -65,7 +65,19 @@ class Explicit(BaseSimulation):
         tmp_output[before_last_input] = float('inf')
         tmp_output[after_next_input] = float('inf')
 
-        output_spikes, causal_set_lengths = torch.min(tmp_output, dim=1) # take output spike happening after a minimum of incoming spikes (complexity: n_pre)
+        # take the earliest computed output spike time, which is the correct one (complexity: n_pre)
+        output_spikes, causal_set_lengths = torch.min(tmp_output, dim=1)
+        
+        # # one could also determine the output spike time requiring the least number of spikes,
+        # # namely by finding the index of the first finite outsput spike time along dim 1 (i.e. when adding input spikes one after another)
+        # _, causal_set_lengths_new = torch.max(tmp_output<torch.inf, dim=1) 
+        # # this is the number of contributing spikes before the output spike happens reduced by 1, i.e. 0 means 1 spike and n means n+1 spikes
+        # # the output spike times can then be computed using the number of spikes
+        # # (also works if all entries are inf, since in this case the index 0 is returned and the following line correctly yields inf as output time)
+        # output_spikes_new = tmp_output.gather(1, causal_set_lengths_new.unsqueeze(1)).squeeze(1)
+        # # and the two methods can be compared (results are identical)
+        # from torch.testing import assert_close
+        # assert_close(output_spikes, output_spikes_new)
 
         ctx.sim_params = sim_params
         ctx.device = device

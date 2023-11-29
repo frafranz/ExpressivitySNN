@@ -16,9 +16,9 @@ class SpikingLayer(torch.nn.Module):
         Arguments:
             input_features, output_features: number of inputs/outputs
             sim_params: parameters used for simulation
-            weights_init: if tuple it is understood as two lists of mean and std, otherwise an array of weights
-            delays_init: if tuple it is understood as two lists of mean and std, otherwise an array of weights
-            thresholds_init: if tuple it is understood as two lists of mean and std, otherwise an array of weights
+            weights_init: if tuple it is understood as mean and std, otherwise an array of weights
+            delays_init: if tuple it is understood as mean and std, otherwise an array of weights
+            thresholds_init: if tuple it is understood as mean and std, otherwise an array of weights
             device: the device to operate on
             bias: number of bias inputs
         """
