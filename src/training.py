@@ -172,7 +172,7 @@ def save_data(dirname, filename, net, all_parameters, train_losses, train_accura
     
     if training_params.get("train_delay"):
         [np.save(dirname + filename + f'_delays_{i}_training.npy', all_parameters[f'delays_{i}']) for i in range(net.n_layers)]
-    if training_params.get("train_thresholds"):
+    if training_params.get("train_threshold"):
         [np.save(dirname + filename + f'_thresholds_{i}_training.npy', all_parameters[f'thresholds_{i}']) for i in range(net.n_layers)]
 
     np.save(dirname + filename + '_train_losses.npy', train_losses)
@@ -674,7 +674,7 @@ def train(training_params, network_layout, neuron_params, dataset_train, dataset
     all_parameters = {f"weights_{i}": [] for i in range(net.n_layers)}
     if training_params.get("train_delay"):
         all_parameters.update({f"delays_{i}": [] for i in range(net.n_layers)})
-    if training_params.get("train_thresholds"):
+    if training_params.get("train_threshold"):
         all_parameters.update({f"thresholds_{i}": [] for i in range(net.n_layers)})
     all_train_loss = []
     all_validate_loss = []

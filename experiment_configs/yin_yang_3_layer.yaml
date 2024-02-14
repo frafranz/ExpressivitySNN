@@ -1,0 +1,61 @@
+dataset: yin_yang
+neuron_params:
+  activation: linear # linear, alpha_equaltime, alpha_doubletime
+  g_leak: 1.0
+  leak: 0.0
+  tau_syn: 1.0
+  tau_mem: 1.0
+  threshold: 1.0
+  delta: 1.0
+network_layout:
+  bias_times: [0.9]
+  # delay_means : [0.1, 0.1]
+  delay_means: [-2.3, -2.3, -2.3]
+  # delay_means: [-10., -10., -10.]
+  # delay_means: [0.0, 0.0, 0.0]
+  # delay_stdevs: [0.01, 0.01, 0.01]
+  delay_stdevs: [0.5, 0.5, 0.5]
+  # delay_stdevs: [0.0, 0.0, 0.0]
+  threshold_means : [1., 1., 1.]
+  # threshold_stdevs: [0.1, 0.1, 0.1]
+  threshold_stdevs: [0., 0., 0.]
+  layer_sizes: [60, 30, 3]
+  n_biases: [1, 1, 1]
+  n_inputs: 4
+  n_layers: 3
+  weight_means: [1.5, 0.5, 0.5]
+  weight_stdevs: [0.8, 0.8, 0.8]
+training_params:
+  batch_size: 150
+  batch_size_eval: 200
+  enforce_cpu: true
+  enforce_mps: false
+  epoch_number: 150
+  epoch_snapshots: [10, 50, 100]
+  learning_rate: 0.005
+  loss:
+    type: MSE
+    t_correct: 1.5
+    t_wrong: 2.5
+    # type: TTFS
+    # alpha: 0.0
+    # beta: 1
+    # xi: 0.2
+  lr_scheduler: {gamma: 0.95, step_size: 20, type: StepLR}
+  max_dw_norm: 0.2
+  max_num_missing_spikes: [0.3, 0.0]
+  momentum: 0
+  numpy_seed: 12345
+  optimizer: adam
+  print_step_percent: 5.0
+  resolution: 0.01
+  sim_time: 4.0
+  substitute_delay: true
+  torch_seed: 2000
+  train_delay: true
+  train_threshold: true
+  training_noise: false
+  use_forward_integrator: false
+  weight_bumping_exp: true
+  weight_bumping_targeted: true
+  weight_bumping_value: 0.0005
