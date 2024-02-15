@@ -105,7 +105,7 @@ class TestEventbasedVsDiscretized(unittest.TestCase):
 
             print(f"#### forward pass for resol {resol}")
             with torch.no_grad():
-                outputs_integrator = layer_integrator(times_input)
+                outputs_integrator, _ = layer_integrator(times_input) # also the discretized calculation returns two values now, the first are the outputs
 
             # handle infs
             if self.debug:
